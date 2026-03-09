@@ -93,7 +93,7 @@ function _cacheDOM() {
     'breadcrumbTitle',
     'statusPanel', 'btnRemoveLib',
     'detailState', 'detailGrid',
-    'synopsisText', 'btnExpandSynopsis',
+    'synopsisText', 'btnExpandSynopsis', 'btnToggleLang',
     'fichaList',
     'tagsSection', 'tagsList',
     'similarSection', 'similarCarousel',
