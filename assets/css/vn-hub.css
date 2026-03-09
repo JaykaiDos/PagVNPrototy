@@ -976,6 +976,8 @@ body::before {
   box-shadow: var(--vh-shadow-lg);
   padding: 0.75rem;
   min-width: 200px;
+  max-height: 60vh;
+  overflow-y: auto;
   animation: vh-menu-in var(--vh-transition) both;
 }
 

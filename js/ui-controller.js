@@ -32,6 +32,7 @@ const _state = {
   view:           'search',
   activeTab:      'all',
   menuTargetVnId: null,
+  menuOpen:       false,
   searchPage:     1,
   searchQuery:    '',
   searchHasMore:  false,
@@ -342,40 +343,7 @@ async function _renderPanel(panelId, entries) {
 // ─────────────────────────────────────────────
 
 function _openStatusMenu(vnId, triggerBtn) {
-  const menu    = _dom.statusMenu;
-  const overlay = _dom.menuOverlay;
-  if (!menu || !overlay) return;
-
-  _state.menuTargetVnId = vnId;
-
-  const rect = triggerBtn.getBoundingClientRect();
-  menu.hidden = false;
-  menu.style.visibility = 'hidden';
-  overlay.hidden = false;
-
-  // Medir menú
-  const menuRect = menu.getBoundingClientRect();
-  const margin = 8;
-  let left = rect.left + window.scrollX;
-  let top  = rect.bottom + window.scrollY + 4;
-
-  // Ajuste vertical: si no hay espacio abajo, abrir arriba
-  const spaceBelow = window.innerHeight - rect.bottom;
-  if (spaceBelow < menuRect.height + margin) {
-    top = rect.top + window.scrollY - menuRect.height - 4;
-  }
-
-  // Ajuste horizontal: mantener dentro de viewport
-  if (left + menuRect.width + margin > window.scrollX + window.innerWidth) {
-    left = window.scrollX + window.innerWidth - menuRect.width - margin;
-  }
-  if (left < window.scrollX + margin) left = window.scrollX + margin;
-
-  menu.style.left = `${left}px`;
-  menu.style.top  = `${top}px`;
-  menu.style.visibility = 'visible';
-
-  menu.querySelector('[role="menuitem"]')?.focus();
+  _openStatusModal(vnId);
 }
 
 function _closeStatusMenu() {
@@ -646,6 +614,14 @@ function _bindEvents() {
       _dom.searchInput?.focus();
     }
   });
+  window.addEventListener('resize', () => {
+    if (!_dom.statusMenu || _dom.statusMenu.hidden) return;
+    _closeStatusMenu();
+  });
+  window.addEventListener('scroll', () => {
+    if (!_dom.statusMenu || _dom.statusMenu.hidden) return;
+    _closeStatusMenu();
+  }, { passive: true });
 }
 
 function _handleGridClick(e) {
@@ -698,6 +674,182 @@ function _confirmAndRemove(vnId) {
   _showToast(`"${title}" eliminada de la biblioteca`, 'success');
 }
 
+function _openStatusModal(vnId) {
+  _state.menuTargetVnId = vnId;
+  let overlay = document.getElementById('statusSelectOverlay');
+  let modal   = document.getElementById('statusSelectModal');
+
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.className = 'vh-modal-overlay';
+    overlay.id        = 'statusSelectOverlay';
+    overlay.setAttribute('aria-hidden', 'true');
+    overlay.hidden = true;
+    document.body.appendChild(overlay);
+  }
+
+  if (!modal) {
+    modal = document.createElement('div');
+    modal.className = 'vh-modal';
+    modal.id        = 'statusSelectModal';
+
+    const header = document.createElement('div');
+    header.className = 'vh-modal__header';
+    const title = document.createElement('h2');
+    title.className   = 'vh-modal__title';
+    title.textContent = 'Añadir a biblioteca';
+    const closeBtn = document.createElement('button');
+    closeBtn.className   = 'vh-modal__close';
+    closeBtn.setAttribute('aria-label', 'Cerrar');
+    closeBtn.textContent = '✕';
+    closeBtn.addEventListener('click', _closeStatusModal);
+    header.appendChild(title);
+    header.appendChild(closeBtn);
+
+    const body = document.createElement('div');
+    body.className = 'vh-modal__body';
+    const list = document.createElement('ul');
+    list.className = 'vh-status-menu__list';
+    list.setAttribute('role', 'menu');
+
+    const options = [
+      ['pending','📌','Pendiente'],
+      ['playing','🎮','Jugando'],
+      ['finished','🏆','Finalizado'],
+      ['dropped','❌','Abandonada'],
+    ];
+    options.forEach(([status, icon, label]) => {
+      const li = document.createElement('li');
+      li.setAttribute('role','none');
+      const btn = document.createElement('button');
+      btn.className = `vh-status-menu__option vh-status-menu__option--${status}`;
+      btn.setAttribute('role','menuitem');
+      btn.dataset.status = status;
+      const i = document.createElement('span');
+      i.setAttribute('aria-hidden','true');
+      i.textContent = icon;
+      const s = document.createElement('span');
+      s.textContent = label;
+      btn.appendChild(i);
+      btn.appendChild(s);
+      btn.addEventListener('click', () => _applyStatusSelection(status));
+      li.appendChild(btn);
+      list.appendChild(li);
+    });
+    body.appendChild(list);
+
+    const footer = document.createElement('div');
+    footer.className = 'vh-modal__footer';
+    const cancel = document.createElement('button');
+    cancel.className   = 'vh-btn vh-btn--ghost';
+    cancel.textContent = 'Cancelar';
+    cancel.addEventListener('click', _closeStatusModal);
+    footer.appendChild(cancel);
+
+    modal.appendChild(header);
+    modal.appendChild(body);
+    modal.appendChild(footer);
+    overlay.appendChild(modal);
+
+    // Cerrar al click fuera
+    overlay.addEventListener('click', _closeStatusModal);
+    // Cerrar con Escape
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !overlay.hidden) _closeStatusModal();
+    });
+  }
+
+  // Si el modal existe pero no está dentro del overlay, moverlo
+  if (modal.parentElement !== overlay) {
+    overlay.appendChild(modal);
+  }
+
+  overlay.hidden = false;
+  modal.hidden   = false;
+}
+
+function _closeStatusModal() {
+  const overlay = document.getElementById('statusSelectOverlay');
+  const modal   = document.getElementById('statusSelectModal');
+  if (overlay) overlay.hidden = true;
+  if (modal)   modal.hidden   = true;
+  _state.menuTargetVnId = null;
+}
+function _ensureStatusMenu() {
+  if (_dom.statusMenu && _dom.menuOverlay) return;
+  const existingMenu = document.getElementById('statusMenu');
+  const existingOverlay = document.getElementById('menuOverlay');
+  if (existingMenu && existingOverlay) {
+    _dom.statusMenu = existingMenu;
+    _dom.menuOverlay = existingOverlay;
+    if (!existingMenu.dataset.bound) {
+      existingMenu.addEventListener('click', (e) => {
+        const btn = e.target.closest('[role="menuitem"][data-status]');
+        if (btn) _applyStatusSelection(btn.dataset.status);
+      });
+      existingMenu.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') _closeStatusMenu();
+      });
+      existingOverlay.addEventListener('click', _closeStatusMenu);
+      existingMenu.dataset.bound = 'true';
+    }
+    return;
+  }
+  const menu = document.createElement('div');
+  menu.className = 'vh-status-menu';
+  menu.id = 'statusMenu';
+  menu.setAttribute('role', 'menu');
+  menu.setAttribute('aria-label', 'Seleccionar estado para la biblioteca');
+  menu.hidden = true;
+  const title = document.createElement('p');
+  title.className = 'vh-status-menu__title';
+  title.textContent = 'Añadir a biblioteca como:';
+  const list = document.createElement('ul');
+  list.className = 'vh-status-menu__list';
+  list.setAttribute('role', 'none');
+  const options = [
+    ['pending','📌','Pendiente'],
+    ['playing','🎮','Jugando'],
+    ['finished','🏆','Finalizado'],
+    ['dropped','❌','Abandonada'],
+  ];
+  options.forEach(([status, icon, label]) => {
+    const li = document.createElement('li');
+    li.setAttribute('role','none');
+    const btn = document.createElement('button');
+    btn.className = `vh-status-menu__option vh-status-menu__option--${status}`;
+    btn.setAttribute('role','menuitem');
+    btn.dataset.status = status;
+    const i = document.createElement('span');
+    i.setAttribute('aria-hidden','true');
+    i.textContent = icon;
+    const s = document.createElement('span');
+    s.textContent = label;
+    btn.appendChild(i);
+    btn.appendChild(s);
+    li.appendChild(btn);
+    list.appendChild(li);
+  });
+  menu.appendChild(title);
+  menu.appendChild(list);
+  const overlay = document.createElement('div');
+  overlay.className = 'vh-overlay';
+  overlay.id = 'menuOverlay';
+  overlay.hidden = true;
+  overlay.setAttribute('aria-hidden','true');
+  document.body.appendChild(menu);
+  document.body.appendChild(overlay);
+  _dom.statusMenu = menu;
+  _dom.menuOverlay = overlay;
+  menu.addEventListener('click', (e) => {
+    const btn = e.target.closest('[role="menuitem"][data-status]');
+    if (btn) _applyStatusSelection(btn.dataset.status);
+  });
+  menu.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') _closeStatusMenu();
+  });
+  overlay.addEventListener('click', _closeStatusMenu);
+}
 
 // ─────────────────────────────────────────────
 // 10. INICIALIZACIÓN
