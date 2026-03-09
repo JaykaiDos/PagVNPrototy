@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>VN-Hub — Pruebas de Persistencia</title>
+</head>
+<body>
+  <h1>Pruebas de Persistencia de Biblioteca</h1>
+  <pre id="log"></pre>
+  <script type="module">
+    import * as LibraryStore from '../js/library-store.js';
+    import { VN_STATUS } from '../js/constants.js';
+    const logEl = document.getElementById('log');
+    function log(msg) { logEl.textContent += msg + '\n'; }
+    try {
+      LibraryStore.init();
+      log('Init OK');
+      LibraryStore.clearAll();
+      log('Clear OK');
+      LibraryStore.addVn('v17', VN_STATUS.PENDING);
+      LibraryStore.addVn('v4', VN_STATUS.PLAYING);
+      LibraryStore.addVn('v11', VN_STATUS.FINISHED);
+      const stats1 = LibraryStore.getStats();
+      log('Tras añadir: ' + JSON.stringify(stats1));
+      const serialized = localStorage.getItem('vnh_library');
+      log('localStorage len: ' + (serialized?.length ?? 0));
+      location.reload();
+    } catch (e) {
+      log('Error: ' + e.message);
+    }
+  </script>
+</body>
+</html>

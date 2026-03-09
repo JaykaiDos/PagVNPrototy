@@ -1,0 +1,1408 @@
+/* ────────────────────────────────────────────────────────────────
+   VN-HUB — Hoja de estilos principal
+   Diseño: Soft Romantic · Rosa · Celeste · Glassmorphism
+   Modo oscuro: Noir · Rojo · Dorado · Profundidad
+
+   ÍNDICE
+   ──────
+    1. Variables (Design Tokens)
+    2. Reset y base tipográfica
+    3. Layout
+    4. Header
+    5. Navegación principal
+    6. Sección header interior
+    7. Buscador
+    8. Grid de cards
+    9. Card de VN
+   10. Badges de estado
+   11. Menú flotante de estado
+   12. Sistema de pestañas
+   13. Estado vacío
+   14. Paginación
+   15. Botones genéricos
+   16. Toast de notificaciones
+   17. Animaciones
+   18. Responsive
+   19. Accesibilidad
+──────────────────────────────────────────────────────────────── */
+
+
+/* ────────────────────────────────────────────────────────────────
+   1. VARIABLES (Design Tokens)
+   Modo claro = defecto. Modo oscuro activa [data-theme="dark"].
+──────────────────────────────────────────────────────────────── */
+
+:root {
+  /* ── MODO CLARO: Blanco · Rosa · Celeste ── */
+
+  /* Fondos glass */
+  --vh-bg-base:        #f0e8f4;
+  --vh-bg-surface:     rgba(255, 255, 255, 0.75);
+  --vh-bg-elevated:    rgba(255, 255, 255, 0.55);
+  --vh-bg-card:        rgba(255, 255, 255, 0.72);
+  --vh-bg-overlay:     rgba(240, 232, 244, 0.92);
+
+  /*
+   * Gradiente de fondo del body.
+   * Técnica del CSS de referencia: radial-gradients superpuestos
+   * que crean atmósfera y profundidad — adaptados a Rosa + Celeste.
+   */
+  --vh-body-bg-color:  #f0e8f4;
+  --vh-body-gradient:
+    radial-gradient(ellipse at 15% 20%,  rgba(236, 72,  153, 0.20) 0%, transparent 50%),
+    radial-gradient(ellipse at 85% 10%,  rgba(14,  165, 233, 0.15) 0%, transparent 45%),
+    radial-gradient(ellipse at 50% 80%,  rgba(244, 114, 182, 0.14) 0%, transparent 55%),
+    radial-gradient(ellipse at 90% 90%,  rgba(56,  189, 248, 0.10) 0%, transparent 40%);
+
+  /* Texto */
+  --vh-text-primary:   #2d1b3d;
+  --vh-text-secondary: #5b4068;
+  --vh-text-muted:     #a891b8;
+  --vh-text-on-accent: #ffffff;
+
+  /* Paleta Rosa */
+  --vh-pink-50:        #fff0f6;
+  --vh-pink-100:       #ffd6eb;
+  --vh-pink-300:       #f9a8d4;
+  --vh-pink-400:       #f472b6;
+  --vh-pink-500:       #ec4899;
+  --vh-pink-600:       #db2777;
+
+  /* Paleta Celeste */
+  --vh-sky-50:         #f0f9ff;
+  --vh-sky-100:        #e0f2fe;
+  --vh-sky-300:        #7dd3fc;
+  --vh-sky-400:        #38bdf8;
+  --vh-sky-500:        #0ea5e9;
+  --vh-sky-600:        #0284c7;
+
+  /* Acentos */
+  --vh-accent:         #ec4899;
+  --vh-accent-hover:   #db2777;
+  --vh-accent-soft:    rgba(236, 72, 153, 0.10);
+  --vh-accent-2:       #0ea5e9;
+  --vh-accent-2-soft:  rgba(14, 165, 233, 0.10);
+
+  /* Bordes glass */
+  --vh-border:         rgba(236, 72, 153, 0.16);
+  --vh-border-focus:   #ec4899;
+  --vh-border-hover:   rgba(236, 72, 153, 0.48);
+  --vh-border-card:    rgba(255, 255, 255, 0.65);
+
+  /* Sombras rosadas */
+  --vh-shadow-sm:           0 2px 8px  rgba(175, 60, 120, 0.10), 0 1px 2px rgba(175, 60, 120, 0.06);
+  --vh-shadow-md:           0 6px 20px rgba(175, 60, 120, 0.14), 0 2px 6px rgba(175, 60, 120, 0.08);
+  --vh-shadow-lg:           0 12px 40px rgba(175, 60, 120, 0.20), 0 4px 10px rgba(175, 60, 120, 0.10);
+  --vh-shadow-accent:       0 4px 20px rgba(236, 72, 153, 0.38);
+  --vh-shadow-accent-hover: 0 6px 30px rgba(236, 72, 153, 0.52);
+  --vh-shadow-focus:        0 0 0 3px  rgba(236, 72, 153, 0.22);
+
+  /* Colores semánticos de peligro */
+  --vh-danger:    #ef4444;
+  --vh-danger-bg: rgba(239, 68, 68, 0.10);
+
+  /* Badges de estado */
+  --vh-badge-pending-bg:   rgba(254, 240, 138, 0.55);
+  --vh-badge-pending-fg:   #854d0e;
+  --vh-badge-pending-bd:   #fde047;
+
+  --vh-badge-playing-bg:   rgba(187, 247, 208, 0.55);
+  --vh-badge-playing-fg:   #166534;
+  --vh-badge-playing-bd:   #86efac;
+
+  --vh-badge-finished-bg:  rgba(191, 219, 254, 0.55);
+  --vh-badge-finished-fg:  #1e40af;
+  --vh-badge-finished-bd:  #93c5fd;
+
+  --vh-badge-dropped-bg:   rgba(254, 202, 202, 0.55);
+  --vh-badge-dropped-fg:   #991b1b;
+  --vh-badge-dropped-bd:   #fca5a5;
+
+  /* Dimensiones */
+  --vh-radius-sm:   6px;
+  --vh-radius-md:   12px;
+  --vh-radius-lg:   18px;
+  --vh-radius-xl:   24px;
+  --vh-radius-full: 9999px;
+
+  /* Transiciones */
+  --vh-transition:      0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  --vh-transition-slow: 0.40s cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Glass blur */
+  --vh-glass-blur: blur(16px);
+
+  /* Blur para contenido adulto */
+  --vh-adult-blur: blur(12px);
+}
+
+
+/* ── MODO OSCURO: Negro · Rojo · Dorado ── */
+[data-theme="dark"] {
+  /* Fondos */
+  --vh-bg-base:        #0a0608;
+  --vh-bg-surface:     rgba(20, 10, 14, 0.88);
+  --vh-bg-elevated:    rgba(32, 16, 20, 0.82);
+  --vh-bg-card:        rgba(22, 11, 16, 0.90);
+  --vh-bg-overlay:     rgba(10, 6, 8, 0.96);
+
+  /*
+   * Gradiente noir con manchas de rojo y dorado — mismo sistema
+   * que el CSS de referencia pero en la paleta oscura del proyecto.
+   */
+  --vh-body-bg-color:  #0a0608;
+  --vh-body-gradient:
+    radial-gradient(ellipse at 20% 25%, rgba(220, 38,  38,  0.24) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 10%, rgba(180, 83,  9,   0.18) 0%, transparent 45%),
+    radial-gradient(ellipse at 55% 85%, rgba(239, 68,  68,  0.14) 0%, transparent 55%),
+    radial-gradient(ellipse at 88% 88%, rgba(245, 158, 11,  0.12) 0%, transparent 40%);
+
+  /* Texto */
+  --vh-text-primary:   #f5ede8;
+  --vh-text-secondary: #c4a898;
+  --vh-text-muted:     #6b4e44;
+  --vh-text-on-accent: #0a0608;
+
+  /* Paleta Rojo (sustituye Rosa) */
+  --vh-pink-50:        #1c0808;
+  --vh-pink-100:       #2d0d0d;
+  --vh-pink-300:       #f87171;
+  --vh-pink-400:       #ef4444;
+  --vh-pink-500:       #dc2626;
+  --vh-pink-600:       #b91c1c;
+
+  /* Paleta Dorado (sustituye Celeste) */
+  --vh-sky-50:         #1a1205;
+  --vh-sky-100:        #2d2008;
+  --vh-sky-300:        #fbbf24;
+  --vh-sky-400:        #f59e0b;
+  --vh-sky-500:        #d97706;
+  --vh-sky-600:        #b45309;
+
+  /* Acentos */
+  --vh-accent:         #ef4444;
+  --vh-accent-hover:   #dc2626;
+  --vh-accent-soft:    rgba(239, 68, 68, 0.12);
+  --vh-accent-2:       #f59e0b;
+  --vh-accent-2-soft:  rgba(245, 158, 11, 0.12);
+
+  /* Bordes */
+  --vh-border:         rgba(239, 68, 68, 0.18);
+  --vh-border-focus:   #ef4444;
+  --vh-border-hover:   rgba(239, 68, 68, 0.52);
+  --vh-border-card:    rgba(239, 68, 68, 0.14);
+
+  /* Sombras oscuras */
+  --vh-shadow-sm:           0 2px 8px  rgba(0, 0, 0, 0.55);
+  --vh-shadow-md:           0 6px 20px rgba(0, 0, 0, 0.65);
+  --vh-shadow-lg:           0 12px 40px rgba(0, 0, 0, 0.80);
+  --vh-shadow-accent:       0 4px 20px rgba(239, 68, 68, 0.42);
+  --vh-shadow-accent-hover: 0 6px 30px rgba(239, 68, 68, 0.58);
+  --vh-shadow-focus:        0 0 0 3px  rgba(239, 68, 68, 0.28);
+
+  /* Danger en dark */
+  --vh-danger:    #f87171;
+  --vh-danger-bg: rgba(248, 113, 113, 0.12);
+
+  /* Badges dark */
+  --vh-badge-pending-bg:   rgba(28, 24, 5,  0.85);
+  --vh-badge-pending-fg:   #fbbf24;
+  --vh-badge-pending-bd:   #78680a;
+
+  --vh-badge-playing-bg:   rgba(5,  26, 10, 0.85);
+  --vh-badge-playing-fg:   #4ade80;
+  --vh-badge-playing-bd:   #166534;
+
+  --vh-badge-finished-bg:  rgba(26, 21, 5,  0.85);
+  --vh-badge-finished-fg:  #fcd34d;
+  --vh-badge-finished-bd:  #92400e;
+
+  --vh-badge-dropped-bg:   rgba(26, 5,  5,  0.85);
+  --vh-badge-dropped-fg:   #f87171;
+  --vh-badge-dropped-bd:   #7f1d1d;
+}
+
+
+/* ────────────────────────────────────────────────────────────────
+   2. RESET Y BASE TIPOGRÁFICA
+──────────────────────────────────────────────────────────────── */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+/*
+ * El body ES el lienzo del diseño.
+ *
+ * TÉCNICA DE TRANSICIÓN DE FONDO:
+ * background-image no es animable en CSS. Para lograr la transición
+ * suave entre el gradiente rosa (light) y el gradiente rojo/dorado (dark)
+ * usamos un pseudo-elemento ::before que contiene el gradiente del dark mode.
+ * En light mode su opacity es 0; al activar [data-theme="dark"] sube a 1.
+ * Esto permite animar con opacity en lugar de background-image.
+ *
+ * background-attachment: fixed mantiene el gradiente estático
+ * mientras el contenido scrollea — efecto de profundidad real.
+ */
+body {
+  font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
+  background-color: var(--vh-body-bg-color);
+  background-image: var(--vh-body-gradient);
+  background-attachment: fixed;
+  color: var(--vh-text-primary);
+  line-height: 1.6;
+  min-height: 100vh;
+  position: relative;
+  transition:
+    background-color var(--vh-transition-slow),
+    color            var(--vh-transition-slow);
+}
+
+/*
+ * Capa del gradiente oscuro superpuesta.
+ * opacity: 0 en light → opacity: 1 en dark.
+ * La transición de opacity ES animable — resuelve el problema.
+ */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background-image:
+    radial-gradient(ellipse at 20% 25%, rgba(220, 38,  38,  0.24) 0%, transparent 50%),
+    radial-gradient(ellipse at 80% 10%, rgba(180, 83,  9,   0.18) 0%, transparent 45%),
+    radial-gradient(ellipse at 55% 85%, rgba(239, 68,  68,  0.14) 0%, transparent 55%),
+    radial-gradient(ellipse at 88% 88%, rgba(245, 158, 11,  0.12) 0%, transparent 40%);
+  opacity: 0;
+  transition: opacity var(--vh-transition-slow);
+  pointer-events: none;
+}
+
+[data-theme="dark"] body::before {
+  opacity: 1;
+}
+
+/* Accesibilidad: visible solo para lectores de pantalla */
+.vh-sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+
+/* ────────────────────────────────────────────────────────────────
+   3. LAYOUT
+──────────────────────────────────────────────────────────────── */
+
+.vh-container {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+}
+
+.vh-view           { display: block; padding: 2rem 0 4rem; }
+.vh-view--hidden,
+.vh-view[hidden]   { display: none !important; }
+
+
+/* ────────────────────────────────────────────────────────────────
+   4. HEADER
+   Panel glass flotante — backdrop-filter sobre el degradado del body.
+──────────────────────────────────────────────────────────────── */
+
+.vh-header {
+  background: var(--vh-bg-surface);
+  backdrop-filter: var(--vh-glass-blur);
+  -webkit-backdrop-filter: var(--vh-glass-blur);
+  border-bottom: 1.5px solid var(--vh-border);
+  box-shadow: var(--vh-shadow-md);
+  padding: 1.25rem 0;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  transition:
+    background     var(--vh-transition-slow),
+    border-color   var(--vh-transition-slow);
+}
+
+.vh-header__inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.vh-header__brand {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.vh-header__logo {
+  font-size: 1.6rem;
+  color: var(--vh-accent);
+  animation: vh-pulse-logo 3s ease-in-out infinite;
+}
+
+.vh-header__title {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 1.9rem;
+  font-weight: 700;
+  color: var(--vh-text-primary);
+  letter-spacing: -0.02em;
+  line-height: 1;
+}
+
+.vh-header__accent {
+  color: var(--vh-accent);
+  text-shadow: 0 0 14px rgba(236, 72, 153, 0.48);
+}
+
+[data-theme="dark"] .vh-header__accent {
+  text-shadow: 0 0 16px rgba(239, 68, 68, 0.62);
+}
+
+.vh-header__tagline {
+  font-size: 0.82rem;
+  color: var(--vh-text-muted);
+  letter-spacing: 0.02em;
+  align-self: center;
+  margin-left: 0.25rem;
+  display: none;
+}
+
+.vh-header__controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.vh-theme-toggle {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--vh-radius-full);
+  border: 1.5px solid var(--vh-border);
+  background: var(--vh-bg-elevated);
+  backdrop-filter: var(--vh-glass-blur);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+  transition: all var(--vh-transition);
+  color: var(--vh-text-primary);
+}
+
+.vh-theme-toggle:hover {
+  border-color: var(--vh-accent);
+  background: var(--vh-accent-soft);
+  box-shadow: var(--vh-shadow-accent);
+  transform: rotate(20deg);
+}
+
+.vh-theme-toggle__icon::before                   { content: '☀️'; }
+[data-theme="dark"] .vh-theme-toggle__icon::before { content: '🌙'; }
+
+
+/* ────────────────────────────────────────────────────────────────
+   5. NAVEGACIÓN PRINCIPAL
+──────────────────────────────────────────────────────────────── */
+
+.vh-main-nav {
+  background: var(--vh-bg-surface);
+  backdrop-filter: var(--vh-glass-blur);
+  -webkit-backdrop-filter: var(--vh-glass-blur);
+  border-bottom: 1.5px solid var(--vh-border);
+  transition: background var(--vh-transition-slow);
+}
+
+.vh-nav__list {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.75rem 0;
+  list-style: none;
+}
+
+.vh-nav__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 1.25rem;
+  border-radius: var(--vh-radius-full);
+  border: 1.5px solid transparent;
+  background: transparent;
+  color: var(--vh-text-secondary);
+  font-family: inherit;
+  font-size: 0.92rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--vh-transition);
+  letter-spacing: 0.01em;
+}
+
+.vh-nav__btn:hover {
+  color: var(--vh-accent);
+  background: var(--vh-accent-soft);
+  border-color: var(--vh-border-hover);
+  transform: translateY(-1px);
+}
+
+.vh-nav__btn--active {
+  background: var(--vh-accent);
+  color: var(--vh-text-on-accent);
+  border-color: var(--vh-accent);
+  box-shadow: var(--vh-shadow-accent);
+  font-weight: 600;
+}
+
+.vh-nav__btn--active:hover {
+  background: var(--vh-accent-hover);
+  border-color: var(--vh-accent-hover);
+  color: var(--vh-text-on-accent);
+  transform: translateY(-1px);
+}
+
+
+/* ────────────────────────────────────────────────────────────────
+   6. SECCIÓN HEADER INTERIOR
+──────────────────────────────────────────────────────────────── */
+
+.vh-section-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.75rem;
+}
+
+.vh-section-title {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 1.65rem;
+  font-weight: 700;
+  color: var(--vh-text-primary);
+  letter-spacing: -0.02em;
+  text-shadow: 0 0 28px rgba(236, 72, 153, 0.20);
+}
+
+[data-theme="dark"] .vh-section-title {
+  text-shadow: 0 0 28px rgba(239, 68, 68, 0.28);
+}
+
+.vh-section-subtitle {
+  font-size: 0.9rem;
+  color: var(--vh-text-muted);
+}
+
+.vh-library-stats {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.vh-stat-pill {
+  padding: 0.25rem 0.75rem;
+  border-radius: var(--vh-radius-full);
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: var(--vh-bg-elevated);
+  backdrop-filter: var(--vh-glass-blur);
+  color: var(--vh-text-secondary);
+  border: 1px solid var(--vh-border);
+}
+
+
+/* ────────────────────────────────────────────────────────────────
+   7. BUSCADOR
+──────────────────────────────────────────────────────────────── */
+
+.vh-search-bar { margin-bottom: 2rem; }
+
+.vh-search-bar__wrapper {
+  display: flex;
+  align-items: center;
+  background: var(--vh-bg-surface);
+  backdrop-filter: var(--vh-glass-blur);
+  -webkit-backdrop-filter: var(--vh-glass-blur);
+  border: 1.5px solid var(--vh-border);
+  border-radius: var(--vh-radius-xl);
+  padding: 0.2rem 0.2rem 0.2rem 1.25rem;
+  gap: 0.5rem;
+  box-shadow: var(--vh-shadow-md);
+  transition: all var(--vh-transition);
+  max-width: 680px;
+}
+
+.vh-search-bar__wrapper:focus-within {
+  border-color: var(--vh-border-focus);
+  box-shadow: var(--vh-shadow-focus), var(--vh-shadow-md);
+}
+
+.vh-search-bar__icon {
+  color: var(--vh-accent);
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.vh-search-bar__input {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--vh-text-primary);
+  font-family: inherit;
+  font-size: 0.97rem;
+  padding: 0.75rem 0;
+  outline: none;
+  min-width: 0;
+}
+
+.vh-search-bar__input::placeholder { color: var(--vh-text-muted); }
+.vh-search-bar__input::-webkit-search-cancel-button { display: none; }
+
+.vh-search-bar__clear {
+  width: 36px; height: 36px;
+  border-radius: var(--vh-radius-full);
+  border: none;
+  background: var(--vh-bg-elevated);
+  color: var(--vh-text-muted);
+  cursor: pointer;
+  font-size: 0.9rem;
+  flex-shrink: 0;
+  transition: all var(--vh-transition);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.vh-search-bar__clear:hover {
+  background: var(--vh-accent-soft);
+  color: var(--vh-accent);
+  box-shadow: 0 0 12px rgba(236, 72, 153, 0.30);
+}
+
+.vh-search-state { text-align: center; padding: 1rem 0 2rem; }
+.vh-search-state__hint  { color: var(--vh-text-muted); font-size: 0.9rem; }
+.vh-search-state__empty { color: var(--vh-text-muted); font-size: 0.95rem; }
+
+.vh-search-state__loading {
+  color: var(--vh-accent);
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.vh-search-state__loading::before {
+  content: '';
+  width: 16px; height: 16px;
+  border: 2px solid var(--vh-pink-100);
+  border-top-color: var(--vh-accent);
+  border-radius: 50%;
+  animation: vh-spin 0.7s linear infinite;
+}
+
+.vh-search-state__error {
+  color: var(--vh-accent);
+  font-size: 0.92rem;
+  background: var(--vh-accent-soft);
+  border: 1px solid var(--vh-border-hover);
+  border-radius: var(--vh-radius-md);
+  padding: 0.75rem 1rem;
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+
+/* ────────────────────────────────────────────────────────────────
+   8. GRID DE CARDS
+──────────────────────────────────────────────────────────────── */
+
+.vh-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 1.25rem;
+}
+
+
+/* ────────────────────────────────────────────────────────────────
+   9. CARD DE VN
+   Glass card con pseudo-elemento de glow en hover.
+   Patrón idéntico al de .season-card en el CSS de referencia.
+──────────────────────────────────────────────────────────────── */
+
+.vh-card {
+  background: var(--vh-bg-card);
+  backdrop-filter: var(--vh-glass-blur);
+  -webkit-backdrop-filter: var(--vh-glass-blur);
+  border-radius: var(--vh-radius-lg);
+  border: 1.5px solid var(--vh-border-card);
+  box-shadow: var(--vh-shadow-sm);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition:
+    transform      var(--vh-transition),
+    box-shadow     var(--vh-transition),
+    border-color   var(--vh-transition);
+  position: relative;
+  animation: vh-card-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Glow radial que aparece en hover — igual que en .season-card::before */
+.vh-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(
+    ellipse at top left,
+    rgba(236, 72, 153, 0.08) 0%,
+    transparent 70%
+  );
+  opacity: 0;
+  transition: opacity var(--vh-transition);
+  pointer-events: none;
+  z-index: 0;
+}
+
+[data-theme="dark"] .vh-card::before {
+  background: radial-gradient(
+    ellipse at top left,
+    rgba(239, 68, 68, 0.10) 0%,
+    transparent 70%
+  );
+}
+
+.vh-card:hover::before { opacity: 1; }
+
+.vh-card:hover {
+  transform: translateY(-6px) scale(1.01);
+  box-shadow: var(--vh-shadow-lg), 0 0 28px rgba(236, 72, 153, 0.18);
+  border-color: var(--vh-border-hover);
+}
+
+[data-theme="dark"] .vh-card:hover {
+  box-shadow: var(--vh-shadow-lg), 0 0 28px rgba(239, 68, 68, 0.22);
+}
+
+/* Todo el contenido sobre el ::before */
+.vh-card__cover-wrapper,
+.vh-card__body,
+.vh-card__footer,
+.vh-card__score { position: relative; z-index: 1; }
+
+/* ── Imagen de portada ── */
+.vh-card__cover-wrapper {
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  overflow: hidden;
+  background: var(--vh-bg-elevated);
+}
+
+.vh-card__cover {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  object-position: top center;
+  display: block;
+  transition: transform var(--vh-transition-slow), filter var(--vh-transition);
+}
+
+.vh-card:hover .vh-card__cover { transform: scale(1.05); }
+.vh-card__cover--adult          { filter: var(--vh-adult-blur); }
+
+.vh-card__adult-badge {
+  position: absolute;
+  top: 8px; right: 8px;
+  background: rgba(0, 0, 0, 0.70);
+  color: var(--vh-pink-300);
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--vh-radius-sm);
+  letter-spacing: 0.05em;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.vh-card__cover-placeholder {
+  width: 100%; height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 3rem;
+  color: var(--vh-text-muted);
+  background: linear-gradient(
+    135deg,
+    rgba(236, 72,  153, 0.12),
+    rgba(14,  165, 233, 0.12)
+  );
+}
+
+.vh-card__status-badge {
+  position: absolute;
+  top: 8px; left: 8px;
+  z-index: 2;
+}
+
+/* ── Cuerpo ── */
+.vh-card__body {
+  padding: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 1;
+}
+
+.vh-card__title {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--vh-text-primary);
+  line-height: 1.35;
+  display: -webkit-box;
+  display: box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  box-orient: vertical;
+  overflow: hidden;
+}
+
+.vh-card__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.vh-card__rating {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--vh-sky-500);
+}
+
+[data-theme="dark"] .vh-card__rating { color: var(--vh-sky-400); }
+.vh-card__rating::before { content: '★'; }
+
+.vh-card__year {
+  font-size: 0.78rem;
+  color: var(--vh-text-muted);
+}
+
+.vh-card__tags { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+
+.vh-card__tag {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: var(--vh-radius-sm);
+  background: var(--vh-accent-soft);
+  color: var(--vh-accent);
+  border: 1px solid var(--vh-border);
+  letter-spacing: 0.02em;
+}
+
+/* Score final */
+.vh-card__score {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.85rem;
+  background: linear-gradient(90deg, var(--vh-accent-soft), var(--vh-accent-2-soft));
+  border-top: 1px solid var(--vh-border);
+  font-size: 0.82rem;
+}
+
+.vh-card__score-value {
+  font-family: 'Playfair Display', serif;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--vh-accent);
+}
+
+.vh-card__score-label {
+  font-size: 0.72rem;
+  color: var(--vh-text-secondary);
+}
+
+/* ── Pie ── */
+.vh-card__footer {
+  padding: 0 0.85rem 0.85rem;
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  position: relative;
+  z-index: 1;
+}
+
+.vh-card__add-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--vh-radius-md);
+  border: 1.5px solid var(--vh-accent);
+  background: var(--vh-accent-soft);
+  color: var(--vh-accent);
+  font-family: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--vh-transition);
+  white-space: nowrap;
+}
+
+.vh-card__add-btn:hover {
+  background: var(--vh-accent);
+  color: var(--vh-text-on-accent);
+  box-shadow: var(--vh-shadow-accent);
+  transform: translateY(-1px);
+}
+
+.vh-card__add-btn--saved {
+  border-color: var(--vh-sky-400);
+  background: var(--vh-accent-2-soft);
+  color: var(--vh-sky-500);
+}
+
+.vh-card__add-btn--saved:hover {
+  background: var(--vh-sky-500);
+  border-color: var(--vh-sky-500);
+  color: var(--vh-text-on-accent);
+}
+
+.vh-card__change-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: var(--vh-radius-md);
+  border: 1.5px solid var(--vh-border);
+  background: var(--vh-bg-elevated);
+  color: var(--vh-text-secondary);
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--vh-transition);
+}
+
+.vh-card__change-btn:hover {
+  border-color: var(--vh-accent);
+  color: var(--vh-accent);
+  background: var(--vh-accent-soft);
+}
+
+.vh-card__remove-btn {
+  width: 32px; height: 32px;
+  border-radius: var(--vh-radius-md);
+  border: 1.5px solid var(--vh-border);
+  background: transparent;
+  color: var(--vh-text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  transition: all var(--vh-transition);
+  flex-shrink: 0;
+}
+
+.vh-card__remove-btn:hover {
+  border-color: var(--vh-danger);
+  color: var(--vh-danger);
+  background: var(--vh-danger-bg);
+}
+
+
+/* ────────────────────────────────────────────────────────────────
+   10. BADGES DE ESTADO
+──────────────────────────────────────────────────────────────── */
+
+.vh-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: var(--vh-radius-full);
+  font-size: 0.72rem;
+  font-weight: 700;
+  border: 1px solid transparent;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+  backdrop-filter: blur(8px);
+}
+
+.vh-badge--pending  { background: var(--vh-badge-pending-bg);  color: var(--vh-badge-pending-fg);  border-color: var(--vh-badge-pending-bd);  }
+.vh-badge--playing  { background: var(--vh-badge-playing-bg);  color: var(--vh-badge-playing-fg);  border-color: var(--vh-badge-playing-bd);  }
+.vh-badge--finished { background: var(--vh-badge-finished-bg); color: var(--vh-badge-finished-fg); border-color: var(--vh-badge-finished-bd); }
+.vh-badge--dropped  { background: var(--vh-badge-dropped-bg);  color: var(--vh-badge-dropped-fg);  border-color: var(--vh-badge-dropped-bd);  }
+
+
+/* ────────────────────────────────────────────────────────────────
+   11. MENÚ FLOTANTE DE ESTADO
+──────────────────────────────────────────────────────────────── */
+
+.vh-status-menu {
+  position: fixed;
+  z-index: 500;
+  background: var(--vh-bg-surface);
+  backdrop-filter: var(--vh-glass-blur);
+  -webkit-backdrop-filter: var(--vh-glass-blur);
+  border: 1.5px solid var(--vh-border);
+  border-radius: var(--vh-radius-lg);
+  box-shadow: var(--vh-shadow-lg);
+  padding: 0.75rem;
+  min-width: 200px;
+  animation: vh-menu-in var(--vh-transition) both;
+}
+
+.vh-status-menu[hidden] { display: none; }
+
+.vh-status-menu__title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--vh-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0 0.25rem 0.5rem;
+  border-bottom: 1px solid var(--vh-border);
+  margin-bottom: 0.5rem;
+}
+
+.vh-status-menu__list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.vh-status-menu__option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--vh-radius-md);
+  border: none;
+  background: transparent;
+  color: var(--vh-text-secondary);
+  font-family: inherit;
+  font-size: 0.88rem;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  transition: all var(--vh-transition);
+}
+
+.vh-status-menu__option:hover           { background: var(--vh-accent-soft);       color: var(--vh-text-primary);      }
+.vh-status-menu__option--pending:hover  { background: var(--vh-badge-pending-bg);  color: var(--vh-badge-pending-fg);  }
+.vh-status-menu__option--playing:hover  { background: var(--vh-badge-playing-bg);  color: var(--vh-badge-playing-fg);  }
+.vh-status-menu__option--finished:hover { background: var(--vh-badge-finished-bg); color: var(--vh-badge-finished-fg); }
+.vh-status-menu__option--dropped:hover  { background: var(--vh-badge-dropped-bg);  color: var(--vh-badge-dropped-fg);  }
+
+.vh-overlay         { position: fixed; inset: 0; z-index: 499; }
+.vh-overlay[hidden] { display: none; }
+
+
+/* ────────────────────────────────────────────────────────────────
+   12. SISTEMA DE PESTAÑAS
+──────────────────────────────────────────────────────────────── */
+
+.vh-tabs {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  padding-bottom: 0;
+  margin-bottom: 1.75rem;
+  border-bottom: 2px solid var(--vh-border);
+  position: relative;
+}
+
+.vh-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.6rem 1rem;
+  border-radius: var(--vh-radius-md) var(--vh-radius-md) 0 0;
+  border: 1.5px solid transparent;
+  border-bottom: none;
+  background: transparent;
+  color: var(--vh-text-muted);
+  font-family: inherit;
+  font-size: 0.88rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--vh-transition);
+  position: relative;
+  bottom: -2px;
+  white-space: nowrap;
+}
+
+.vh-tab:hover {
+  color: var(--vh-text-primary);
+  background: var(--vh-bg-elevated);
+  backdrop-filter: var(--vh-glass-blur);
+}
+
+.vh-tab--active {
+  background: var(--vh-bg-surface);
+  backdrop-filter: var(--vh-glass-blur);
+  color: var(--vh-accent);
+  border-color: var(--vh-border);
+  border-bottom-color: var(--vh-body-bg-color);
+  font-weight: 600;
+  box-shadow: 0 -2px 12px rgba(236, 72, 153, 0.14);
+}
+
+[data-theme="dark"] .vh-tab--active {
+  box-shadow: 0 -2px 12px rgba(239, 68, 68, 0.18);
+}
+
+.vh-tab__icon { font-size: 0.95rem; }
+
+.vh-tab__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px; height: 20px;
+  padding: 0 5px;
+  border-radius: var(--vh-radius-full);
+  font-size: 0.7rem;
+  font-weight: 700;
+  background: var(--vh-bg-elevated);
+  color: var(--vh-text-muted);
+  transition: all var(--vh-transition);
+}
+
+.vh-tab--active .vh-tab__count {
+  background: var(--vh-accent);
+  color: var(--vh-text-on-accent);
+}
+
+.vh-tabpanel           { display: block; }
+.vh-tabpanel--hidden,
+.vh-tabpanel[hidden]   { display: none !important; }
+
+
+/* ────────────────────────────────────────────────────────────────
+   13. ESTADO VACÍO
+──────────────────────────────────────────────────────────────── */
+
+.vh-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.25rem;
+  padding: 4rem 1rem;
+  text-align: center;
+}
+
+.vh-empty-state[hidden] { display: none; }
+
+.vh-empty-state__text {
+  font-size: 0.97rem;
+  color: var(--vh-text-muted);
+  max-width: 320px;
+  line-height: 1.5;
+}
+
+
+/* ────────────────────────────────────────────────────────────────
+   14. PAGINACIÓN
+──────────────────────────────────────────────────────────────── */
+
+.vh-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  margin-top: 2.5rem;
+  flex-wrap: wrap;
+}
+
+.vh-pagination[hidden] { display: none; }
+
+.vh-pagination__info {
+  font-size: 0.85rem;
+  color: var(--vh-text-muted);
+}
+
+
+/* ────────────────────────────────────────────────────────────────
+   15. BOTONES GENÉRICOS
+──────────────────────────────────────────────────────────────── */
+
+.vh-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.6rem 1.4rem;
+  border-radius: var(--vh-radius-full);
+  border: 1.5px solid transparent;
+  font-family: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--vh-transition);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.vh-btn--primary {
+  background: var(--vh-accent);
+  color: var(--vh-text-on-accent);
+  border-color: var(--vh-accent);
+  box-shadow: var(--vh-shadow-accent);
+}
+
+.vh-btn--primary:hover {
+  background: var(--vh-accent-hover);
+  border-color: var(--vh-accent-hover);
+  transform: translateY(-2px);
+  box-shadow: var(--vh-shadow-accent-hover);
+}
+
+.vh-btn--ghost {
+  background: var(--vh-bg-elevated);
+  backdrop-filter: var(--vh-glass-blur);
+  color: var(--vh-text-secondary);
+  border-color: var(--vh-border);
+}
+
+.vh-btn--ghost:hover {
+  border-color: var(--vh-accent);
+  color: var(--vh-accent);
+  background: var(--vh-accent-soft);
+  transform: translateY(-1px);
+}
+
+.vh-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+
+/* ────────────────────────────────────────────────────────────────
+   16. TOAST DE NOTIFICACIONES
+──────────────────────────────────────────────────────────────── */
+
+.vh-toast {
+  position: fixed;
+  bottom: 1.5rem; right: 1.5rem;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.75rem 1.25rem;
+  background: var(--vh-bg-surface);
+  backdrop-filter: var(--vh-glass-blur);
+  border: 1px solid var(--vh-border);
+  border-left: 3px solid var(--vh-accent);
+  border-radius: var(--vh-radius-md);
+  box-shadow: var(--vh-shadow-lg);
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: var(--vh-text-primary);
+  max-width: 320px;
+  animation: vh-toast-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.vh-toast[hidden] { display: none; }
+
+.vh-toast--success { border-left-color: #22c55e; }
+.vh-toast--error   { border-left-color: var(--vh-danger); }
+.vh-toast--info    { border-left-color: var(--vh-sky-400); }
+
+.vh-toast__icon    { font-size: 1rem; flex-shrink: 0; }
+.vh-toast__message { flex: 1; }
+
+
+/* ────────────────────────────────────────────────────────────────
+   17. ANIMACIONES
+──────────────────────────────────────────────────────────────── */
+
+@keyframes vh-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Pulso del logo con glow — mismo concepto que @keyframes glow del CSS de referencia */
+@keyframes vh-pulse-logo {
+  0%, 100% {
+    opacity: 1;
+    filter: drop-shadow(0 0 6px rgba(236, 72, 153, 0.55));
+  }
+  50% {
+    opacity: 0.75;
+    filter: drop-shadow(0 0 14px rgba(236, 72, 153, 0.90));
+  }
+}
+
+[data-theme="dark"] .vh-header__logo {
+  animation-name: vh-pulse-logo-dark;
+}
+
+@keyframes vh-pulse-logo-dark {
+  0%, 100% {
+    opacity: 1;
+    filter: drop-shadow(0 0 6px  rgba(239, 68, 68, 0.60));
+  }
+  50% {
+    opacity: 0.75;
+    filter: drop-shadow(0 0 16px rgba(239, 68, 68, 0.95));
+  }
+}
+
+@keyframes vh-menu-in {
+  from { opacity: 0; transform: translateY(-6px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0)    scale(1);    }
+}
+
+@keyframes vh-toast-in {
+  from { opacity: 0; transform: translateX(calc(100% + 1.5rem)); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes vh-card-in {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vh-card,
+  .vh-status-menu,
+  .vh-toast,
+  .vh-header__logo { animation: none; }
+  .vh-card:hover   { transform: none; }
+}
+
+
+/* ────────────────────────────────────────────────────────────────
+   18. RESPONSIVE
+──────────────────────────────────────────────────────────────── */
+
+@media (min-width: 480px) {
+  .vh-cards-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+}
+
+@media (min-width: 768px) {
+  .vh-header__tagline { display: block; }
+  .vh-cards-grid {
+    grid-template-columns: repeat(auto-fill, minmax(195px, 1fr));
+    gap: 1.5rem;
+  }
+  .vh-tab          { padding: 0.65rem 1.25rem; }
+  .vh-section-title { font-size: 1.9rem; }
+}
+
+@media (min-width: 1024px) {
+  .vh-cards-grid { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 1.75rem; }
+  .vh-container  { padding: 0 2rem; }
+}
+
+@media (max-width: 480px) {
+  .vh-tabs {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .vh-tabs::-webkit-scrollbar { display: none; }
+  .vh-tab { white-space: nowrap; flex-shrink: 0; }
+
+  .vh-toast { left: 1rem; right: 1rem; max-width: none; }
+
+  .vh-status-menu {
+    position: fixed;
+    bottom: 1rem; left: 1rem; right: 1rem;
+    top: auto;
+    min-width: unset;
+    border-radius: var(--vh-radius-xl);
+  }
+}
+
+
+/* ────────────────────────────────────────────────────────────────
+   19. ACCESIBILIDAD
+──────────────────────────────────────────────────────────────── */
+
+.vh-tab:focus-visible,
+.vh-btn:focus-visible,
+.vh-nav__btn:focus-visible,
+.vh-card__add-btn:focus-visible,
+.vh-card__change-btn:focus-visible,
+.vh-card__remove-btn:focus-visible,
+.vh-status-menu__option:focus-visible,
+.vh-theme-toggle:focus-visible,
+.vh-search-bar__input:focus-visible {
+  outline: 2px solid var(--vh-accent);
+  outline-offset: 2px;
+}
+
+/* Enlaces del título sin subrayado y con color coherente */
+.vh-card__title-link {
+  text-decoration: none;
+  color: var(--vh-text-primary);
+}
+.vh-card__title-link:hover { text-decoration: none; }
+
+/* Card clickeable con efecto hover */
+.vh-card--linkable {
+  cursor: pointer;
+  transition: transform var(--vh-transition), box-shadow var(--vh-transition);
+}
+.vh-card--linkable:hover {
+  transform: translateY(-2px) scale(1.01);
+  box-shadow: var(--vh-shadow-md);
+}
+
+/* Botón de edición en Biblioteca */
+.vh-card__edit-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.5rem 0.6rem;
+  border-radius: var(--vh-radius-md);
+  border: 1.5px solid var(--vh-border);
+  background: var(--vh-bg-elevated);
+  color: var(--vh-text-secondary);
+  font-family: inherit;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--vh-transition);
+}
+.vh-card__edit-btn:hover {
+  border-color: var(--vh-accent);
+  color: var(--vh-accent);
+  background: var(--vh-accent-soft);
+}
+.vh-card__edit-btn:active {
+  transform: translateY(1px);
+}

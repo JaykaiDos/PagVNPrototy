@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VN-Hub — Detalles</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="assets/css/vn-hub.css" />
+  <link rel="stylesheet" href="assets/css/vn-hub-components.css" />
+  <link rel="stylesheet" href="assets/css/vn-hub-details.css" />
+</head>
+
+<body>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       HEADER
+  ═══════════════════════════════════════════════════════════════ -->
+  <header class="vh-header">
+    <div class="vh-container vh-header__inner">
+
+      <div class="vh-header__brand">
+        <a href="index.html" class="vh-header__brand-link" aria-label="Volver al inicio">
+          <span class="vh-header__logo" aria-hidden="true">✦</span>
+          <h1 class="vh-header__title">VN<span class="vh-header__accent">Hub</span></h1>
+        </a>
+        <!-- Miga de pan -->
+        <nav class="vh-breadcrumb" aria-label="Ruta de navegación">
+          <a href="index.html" class="vh-breadcrumb__link">Inicio</a>
+          <span class="vh-breadcrumb__sep" aria-hidden="true">›</span>
+          <span class="vh-breadcrumb__current" id="breadcrumbTitle">Cargando…</span>
+        </nav>
+      </div>
+
+      <div class="vh-header__controls">
+        <div id="authContainer" class="vh-auth-container"></div>
+        <button
+          class="vh-theme-toggle"
+          id="themeToggle"
+          aria-label="Cambiar entre modo claro y oscuro"
+          title="Cambiar tema"
+        >
+          <span class="vh-theme-toggle__icon" aria-hidden="true"></span>
+        </button>
+      </div>
+
+    </div>
+  </header>
+
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       HERO — Imagen de fondo con blur + portada en primer plano
+  ═══════════════════════════════════════════════════════════════ -->
+  <section class="vnd-hero" id="detailHero" aria-label="Portada de la visual novel">
+
+    <!-- Fondo CG con blur (se aplica via JS con la misma imagen de portada) -->
+    <div class="vnd-hero__bg" id="heroBg" aria-hidden="true"></div>
+
+    <div class="vh-container vnd-hero__content">
+
+      <!-- Portada principal -->
+      <div class="vnd-hero__cover-wrapper">
+        <div class="vnd-hero__cover-skeleton" id="coverSkeleton" aria-hidden="true"></div>
+        <img
+          class="vnd-hero__cover"
+          id="heroCover"
+          alt=""
+          loading="eager"
+          decoding="async"
+          hidden
+        />
+        <div class="vnd-hero__adult-badge" id="adultBadge" hidden aria-label="Contenido adulto">18+</div>
+      </div>
+
+      <!-- Info rápida en el Hero -->
+      <div class="vnd-hero__info">
+        <div class="vnd-hero__skeleton-block" id="heroSkeleton">
+          <div class="vh-skeleton vh-skeleton--line" style="width:75%;height:2rem;"></div>
+          <div class="vh-skeleton vh-skeleton--line" style="width:45%;height:1rem;margin-top:.75rem;"></div>
+          <div class="vh-skeleton vh-skeleton--line" style="width:60%;height:1rem;margin-top:.5rem;"></div>
+        </div>
+
+        <h2 class="vnd-hero__title" id="heroTitle" hidden></h2>
+
+        <div class="vnd-hero__meta" id="heroMeta" hidden>
+          <span class="vnd-meta-pill" id="metaRating" aria-label="Rating"></span>
+          <span class="vnd-meta-pill" id="metaYear" aria-label="Año de lanzamiento"></span>
+          <span class="vnd-meta-pill" id="metaDuration" aria-label="Duración estimada"></span>
+        </div>
+
+        <!-- Panel de gestión personal: selector de estado -->
+        <div class="vnd-hero__status-panel" id="statusPanel" hidden>
+          <p class="vnd-status-panel__label">Mi estado</p>
+          <div class="vnd-status-panel__options" role="group" aria-label="Cambiar estado en biblioteca">
+            <button class="vnd-status-btn" data-status="pending"  aria-pressed="false">
+              <span aria-hidden="true">📌</span> Pendiente
+            </button>
+            <button class="vnd-status-btn" data-status="playing"  aria-pressed="false">
+              <span aria-hidden="true">🎮</span> Jugando
+            </button>
+            <button class="vnd-status-btn" data-status="finished" aria-pressed="false">
+              <span aria-hidden="true">🏆</span> Finalizado
+            </button>
+            <button class="vnd-status-btn" data-status="dropped"  aria-pressed="false">
+              <span aria-hidden="true">❌</span> Abandonada
+            </button>
+          </div>
+          <button class="vnd-status-panel__remove vh-btn vh-btn--ghost" id="btnRemoveLib" hidden>
+            🗑 Quitar de biblioteca
+          </button>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       CUERPO DE INFORMACIÓN
+  ═══════════════════════════════════════════════════════════════ -->
+  <main class="vh-container vnd-body" id="detailBody">
+
+    <!-- Estado de carga / error -->
+    <div id="detailState" aria-live="polite"></div>
+
+    <!-- Grid principal: sinopsis + ficha técnica -->
+    <div class="vnd-grid" id="detailGrid" hidden>
+
+      <!-- Columna izquierda: Sinopsis + Tags -->
+      <section class="vnd-section" aria-labelledby="sectionSynopsis">
+        <h3 class="vnd-section__title" id="sectionSynopsis">📖 Sinopsis</h3>
+        <div class="vnd-synopsis" id="synopsisText"></div>
+        <button class="vnd-synopsis__expand vh-btn vh-btn--ghost" id="btnExpandSynopsis" hidden>
+          Leer más ↓
+        </button>
+        <button class="vnd-synopsis__lang vh-btn vh-btn--ghost" id="btnToggleLang" hidden>
+          Ver original
+        </button>
+      </section>
+
+      <!-- Columna derecha: Ficha técnica -->
+      <aside class="vnd-ficha" aria-labelledby="sectionFicha">
+        <h3 class="vnd-section__title" id="sectionFicha">📋 Ficha Técnica</h3>
+        <dl class="vnd-ficha__list" id="fichaList"></dl>
+      </aside>
+
+    </div>
+
+    <!-- Tags visuales interactivos -->
+    <section class="vnd-tags-section" id="tagsSection" hidden aria-labelledby="sectionTags">
+      <h3 class="vnd-section__title" id="sectionTags">🏷 Géneros y Etiquetas</h3>
+      <div class="vnd-tags" id="tagsList" role="list" aria-label="Etiquetas de la visual novel"></div>
+    </section>
+
+
+    <!-- ══════════════════════════════════════════════════════
+         CARRUSEL DE NOVELAS SIMILARES
+    ══════════════════════════════════════════════════════ -->
+    <section class="vnd-similar" id="similarSection" hidden aria-labelledby="sectionSimilar">
+      <div class="vnd-similar__header">
+        <h3 class="vnd-section__title" id="sectionSimilar">✨ Novelas Similares</h3>
+        <p class="vnd-similar__subtitle">Basado en etiquetas compartidas</p>
+      </div>
+
+      <div class="vnd-carousel-wrapper">
+        <button class="vnd-carousel__btn vnd-carousel__btn--prev" id="carouselPrev" aria-label="Anterior">‹</button>
+        <div class="vnd-carousel" id="similarCarousel" role="list" aria-label="Novelas similares"></div>
+        <button class="vnd-carousel__btn vnd-carousel__btn--next" id="carouselNext" aria-label="Siguiente">›</button>
+      </div>
+    </section>
+
+  </main>
+
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       TOAST
+  ═══════════════════════════════════════════════════════════════ -->
+  <div class="vh-toast" id="toast" role="status"
+    aria-live="polite" aria-atomic="true" hidden>
+    <span class="vh-toast__icon" aria-hidden="true"></span>
+    <span class="vh-toast__message"></span>
+  </div>
+
+
+  <!-- SCRIPTS — novel-details.js orquesta todo en esta página -->
+  <script type="module" src="js/novel-details.js"></script>
+
+</body>
+</html>

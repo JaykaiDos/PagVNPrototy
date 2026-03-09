@@ -1,0 +1,722 @@
+/* ────────────────────────────────────────────────────────────────
+   VN-HUB DETAILS — Estilos exclusivos de novel-details.html
+   v2: Correcciones
+    - Hero: fondo con color sólido de fallback + transición opacity
+      (elimina el "negro infinito" cuando la imagen tarda en cargar)
+    - Links de cards: reset del color azul nativo del navegador
+──────────────────────────────────────────────────────────────── */
+
+
+/* ════════════════════════════════════════════════════════════════
+   1. BREADCRUMB
+════════════════════════════════════════════════════════════════ */
+
+.vh-header__brand-link {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  text-decoration: none;
+  color: inherit;
+}
+
+.vh-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--vh-text-muted);
+  margin-top: 0.2rem;
+}
+
+.vh-breadcrumb__link {
+  color: var(--vh-accent);
+  text-decoration: none;
+  font-weight: 500;
+  transition: opacity var(--vh-transition);
+}
+
+.vh-breadcrumb__link:hover { opacity: 0.75; }
+
+.vh-breadcrumb__sep {
+  color: var(--vh-text-muted);
+  font-size: 0.9rem;
+}
+
+.vh-breadcrumb__current {
+  color: var(--vh-text-secondary);
+  font-weight: 500;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+
+/* ════════════════════════════════════════════════════════════════
+   2. HERO — FIX: fondo sólido de fallback para evitar negro vacío
+════════════════════════════════════════════════════════════════ */
+
+.vnd-hero {
+  position: relative;
+  min-height: 380px;
+  overflow: hidden;
+  display: flex;
+  align-items: flex-end;
+
+  /*
+   * FIX v2: color de fallback mientras carga la imagen.
+   * En modo oscuro usamos el fondo de superficie; en claro un tono gris-azulado.
+   * Esto evita el cuadro negro vacío que se veía antes de cargar la imagen.
+   */
+  background-color: var(--vh-bg-surface);
+}
+
+/* Fondo blur — se hace visible sólo cuando tiene background-image (seteado por JS) */
+.vnd-hero__bg {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center top;
+  /* FIX v2: empieza invisible y hace fade-in cuando JS le asigna la imagen */
+  opacity: 0;
+  transition: opacity 0.6s ease;
+  filter: blur(22px) brightness(0.45) saturate(1.2);
+  transform: scale(1.08); /* Evita bordes blancos del blur */
+  z-index: 0;
+}
+
+/*
+ * FIX v2: clase que JS añade al #heroBg después de asignar background-image.
+ * Desencadena el fade-in suave del fondo.
+ */
+.vnd-hero__bg--loaded {
+  opacity: 1;
+}
+
+/* Gradiente sobre el fondo para legibilidad del texto */
+.vnd-hero::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(to top,  rgba(0,0,0,0.72) 0%, transparent 60%),
+    linear-gradient(to right, rgba(0,0,0,0.35) 0%, transparent 50%);
+  z-index: 1;
+}
+
+/* Contenido del hero sobre el fondo */
+.vnd-hero__content {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: flex-end;
+  gap: 2rem;
+  padding-top: 2rem;
+  padding-bottom: 2.5rem;
+}
+
+
+/* ── Portada ── */
+.vnd-hero__cover-wrapper {
+  position: relative;
+  flex-shrink: 0;
+  width: 160px;
+}
+
+.vnd-hero__cover-skeleton {
+  width: 160px;
+  height: 224px;
+  border-radius: var(--vh-radius-lg);
+  background: rgba(255,255,255,0.12);
+  border: 2px solid rgba(255,255,255,0.18);
+  animation: vh-skeleton-pulse 1.5s ease-in-out infinite alternate;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2.5rem;
+}
+
+.vnd-hero__cover-placeholder {
+  background: rgba(255,255,255,0.08) !important;
+  animation: none !important;
+}
+
+.vnd-hero__cover {
+  width: 160px;
+  height: 224px;
+  object-fit: cover;
+  border-radius: var(--vh-radius-lg);
+  border: 2.5px solid rgba(255,255,255,0.25);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.08);
+  transition: transform var(--vh-transition);
+}
+
+.vnd-hero__cover:hover {
+  transform: scale(1.02);
+}
+
+.vnd-hero__adult-badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  background: rgba(220,38,38,0.9);
+  color: white;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.2rem 0.45rem;
+  border-radius: var(--vh-radius-sm);
+  letter-spacing: 0.05em;
+  backdrop-filter: blur(4px);
+}
+
+
+/* ── Info en el Hero ── */
+.vnd-hero__info {
+  flex: 1;
+  min-width: 0;
+}
+
+.vnd-hero__skeleton-block {
+  display: flex;
+  flex-direction: column;
+}
+
+.vnd-hero__title {
+  font-family: 'Playfair Display', serif;
+  font-size: clamp(1.5rem, 4vw, 2.5rem);
+  font-weight: 700;
+  color: #ffffff;
+  line-height: 1.2;
+  text-shadow: 0 2px 12px rgba(0,0,0,0.6);
+  margin-bottom: 0.75rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.vnd-hero__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+}
+
+.vnd-meta-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.75rem;
+  border-radius: var(--vh-radius-full);
+  background: rgba(255,255,255,0.15);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,255,255,0.22);
+  color: rgba(255,255,255,0.92);
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+
+/* ════════════════════════════════════════════════════════════════
+   3. PANEL DE ESTADO (dentro del Hero)
+════════════════════════════════════════════════════════════════ */
+
+.vnd-hero__status-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.vnd-status-panel__label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: rgba(255,255,255,0.6);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.vnd-status-panel__options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.vnd-status-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 1rem;
+  border-radius: var(--vh-radius-full);
+  border: 1.5px solid rgba(255,255,255,0.25);
+  background: rgba(255,255,255,0.1);
+  backdrop-filter: blur(8px);
+  color: rgba(255,255,255,0.85);
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--vh-transition);
+  white-space: nowrap;
+}
+
+.vnd-status-btn:hover {
+  background: rgba(255,255,255,0.22);
+  border-color: rgba(255,255,255,0.5);
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.vnd-status-btn--active {
+  background: var(--vh-accent);
+  border-color: var(--vh-accent);
+  color: #ffffff;
+  box-shadow: 0 0 16px rgba(236,72,153,0.5);
+}
+
+[data-theme="dark"] .vnd-status-btn--active {
+  background: var(--vh-accent);
+  border-color: var(--vh-accent);
+  box-shadow: 0 0 16px rgba(239,68,68,0.55);
+}
+
+.vnd-status-panel__remove {
+  align-self: flex-start;
+  margin-top: 0.25rem;
+  color: rgba(255,255,255,0.55) !important;
+  border-color: rgba(255,255,255,0.2) !important;
+  font-size: 0.78rem;
+}
+
+.vnd-status-panel__remove:hover {
+  color: #f87171 !important;
+  border-color: #f87171 !important;
+}
+
+
+/* ════════════════════════════════════════════════════════════════
+   4. CUERPO PRINCIPAL
+════════════════════════════════════════════════════════════════ */
+
+.vnd-body {
+  padding-top: 2.5rem;
+  padding-bottom: 4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2.5rem;
+}
+
+.vnd-grid {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 2rem;
+  align-items: start;
+}
+
+@media (max-width: 768px) {
+  .vnd-grid { grid-template-columns: 1fr; }
+}
+
+.vnd-section__title {
+  font-family: 'Playfair Display', serif;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--vh-text-primary);
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--vh-border);
+}
+
+.vnd-section {
+  background: var(--vh-bg-card);
+  backdrop-filter: var(--vh-glass-blur);
+  border: 1px solid var(--vh-border-card);
+  border-radius: var(--vh-radius-lg);
+  box-shadow: var(--vh-shadow-sm);
+  padding: 1.5rem;
+}
+
+
+/* ════════════════════════════════════════════════════════════════
+   5. SINOPSIS
+════════════════════════════════════════════════════════════════ */
+
+.vnd-synopsis {
+  font-size: 0.92rem;
+  line-height: 1.75;
+  color: var(--vh-text-secondary);
+  white-space: pre-wrap;
+}
+
+.vnd-synopsis__expand {
+  margin-top: 0.75rem;
+  font-size: 0.82rem;
+  padding: 0.35rem 0.9rem;
+}
+
+
+/* ════════════════════════════════════════════════════════════════
+   6. FICHA TÉCNICA
+════════════════════════════════════════════════════════════════ */
+
+.vnd-ficha {
+  background: var(--vh-bg-card);
+  backdrop-filter: var(--vh-glass-blur);
+  border: 1px solid var(--vh-border-card);
+  border-radius: var(--vh-radius-lg);
+  box-shadow: var(--vh-shadow-sm);
+  padding: 1.5rem;
+}
+
+.vnd-ficha__list {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.5rem 1rem;
+  margin: 0;
+}
+
+.vnd-ficha__term {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--vh-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  align-self: center;
+  white-space: nowrap;
+}
+
+.vnd-ficha__def {
+  font-size: 0.88rem;
+  color: var(--vh-text-primary);
+  font-weight: 500;
+  margin: 0;
+  word-break: break-word;
+}
+
+
+/* ════════════════════════════════════════════════════════════════
+   7. TAGS INTERACTIVOS
+════════════════════════════════════════════════════════════════ */
+
+.vnd-tags-section {
+  background: var(--vh-bg-card);
+  backdrop-filter: var(--vh-glass-blur);
+  border: 1px solid var(--vh-border-card);
+  border-radius: var(--vh-radius-lg);
+  box-shadow: var(--vh-shadow-sm);
+  padding: 1.5rem;
+}
+
+.vnd-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.vnd-tag-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.35rem 0.9rem;
+  border-radius: var(--vh-radius-full);
+  border: 1.5px solid var(--vh-border);
+  background: var(--vh-bg-elevated);
+  color: var(--vh-text-secondary);
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--vh-transition);
+}
+
+.vnd-tag-pill:hover {
+  border-color: var(--vh-accent);
+  background: var(--vh-accent-soft);
+  color: var(--vh-accent);
+  transform: translateY(-2px);
+  box-shadow: var(--vh-shadow-sm);
+}
+
+.vnd-tag-pill:active { transform: translateY(0); }
+
+[data-theme="dark"] .vnd-tag-pill:hover {
+  border-color: var(--vh-accent);
+  background: rgba(239,68,68,0.1);
+  color: var(--vh-accent);
+}
+
+
+/* ════════════════════════════════════════════════════════════════
+   8. CARRUSEL DE SIMILARES
+════════════════════════════════════════════════════════════════ */
+
+.vnd-similar {
+  background: var(--vh-bg-card);
+  backdrop-filter: var(--vh-glass-blur);
+  border: 1px solid var(--vh-border-card);
+  border-radius: var(--vh-radius-lg);
+  box-shadow: var(--vh-shadow-sm);
+  padding: 1.5rem;
+}
+
+.vnd-similar__header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.vnd-similar__subtitle {
+  font-size: 0.78rem;
+  color: var(--vh-text-muted);
+}
+
+.vnd-carousel-wrapper {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.vnd-carousel__btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1.5px solid var(--vh-border);
+  background: var(--vh-bg-elevated);
+  color: var(--vh-text-secondary);
+  font-size: 1.3rem;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--vh-transition);
+  flex-shrink: 0;
+}
+
+.vnd-carousel__btn:hover:not(:disabled) {
+  border-color: var(--vh-accent);
+  color: var(--vh-accent);
+  background: var(--vh-accent-soft);
+}
+
+.vnd-carousel__btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.vnd-carousel {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+  overflow: hidden;
+}
+
+@media (max-width: 600px) {
+  .vnd-carousel { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 380px) {
+  .vnd-carousel { grid-template-columns: 1fr; }
+}
+
+.vnd-carousel-card {
+  border-radius: var(--vh-radius-md);
+  overflow: hidden;
+  border: 1px solid var(--vh-border);
+  background: var(--vh-bg-elevated);
+  transition: all var(--vh-transition);
+}
+
+.vnd-carousel-card:hover {
+  border-color: var(--vh-border-hover);
+  box-shadow: var(--vh-shadow-md);
+  transform: translateY(-3px);
+}
+
+.vnd-carousel-card__link {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+}
+
+.vnd-carousel-card__cover {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  display: block;
+  transition: transform var(--vh-transition);
+}
+
+.vnd-carousel-card__cover--adult { filter: blur(8px); }
+.vnd-carousel-card__cover:hover  { transform: scale(1.03); }
+
+.vnd-carousel-card__placeholder {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--vh-bg-elevated);
+  font-size: 2rem;
+}
+
+.vnd-carousel-card__info {
+  padding: 0.6rem 0.75rem;
+}
+
+.vnd-carousel-card__title {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--vh-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+
+.vnd-carousel-card__rating {
+  font-size: 0.72rem;
+  color: var(--vh-text-muted);
+  margin-top: 0.2rem;
+}
+
+
+/* ════════════════════════════════════════════════════════════════
+   9. ESTADOS DE CARGA Y ERROR
+════════════════════════════════════════════════════════════════ */
+
+.vnd-loading { padding: 2rem 0; }
+
+.vnd-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  padding: 3rem 1rem;
+  text-align: center;
+}
+
+.vnd-error__icon {
+  font-size: 2.5rem;
+  opacity: 0.5;
+}
+
+.vnd-error__msg {
+  font-size: 0.95rem;
+  color: var(--vh-text-secondary);
+  max-width: 420px;
+  line-height: 1.6;
+}
+
+.vh-skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--vh-bg-elevated) 25%,
+    var(--vh-border) 50%,
+    var(--vh-bg-elevated) 75%
+  );
+  background-size: 200% 100%;
+  animation: vh-skeleton-pulse 1.5s ease-in-out infinite;
+  border-radius: var(--vh-radius-sm);
+}
+
+@keyframes vh-skeleton-pulse {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.vh-skeleton--line {
+  display: block;
+  border-radius: var(--vh-radius-sm);
+}
+
+
+/* ════════════════════════════════════════════════════════════════
+   10. LINK DE TÍTULO EN CARDS (render-engine.js)
+   FIX v2: reset del color azul nativo del navegador.
+   El <a> dentro de <h3.vh-card__title> hereda el color del h3,
+   que a su vez usa el color de texto de la card.
+   Se fuerza color: inherit en todos los contextos posibles.
+════════════════════════════════════════════════════════════════ */
+
+.vh-card__title-link,
+.vh-card__title-link:link,
+.vh-card__title-link:visited {
+  /* Reset completo del color de link nativo del navegador */
+  color: inherit;
+  text-decoration: none;
+  display: block;
+  transition: color var(--vh-transition);
+}
+
+.vh-card__title-link:hover,
+.vh-card__title-link:focus {
+  color: var(--vh-accent);
+  text-decoration: none;
+}
+
+/* El card completo es clickeable — cursor pointer en toda la card */
+.vh-card {
+  cursor: default;
+}
+
+.vh-card__title {
+  /* Garantiza que el h3 pase el color correcto al <a> hijo */
+  color: var(--vh-text-primary);
+}
+
+
+/* ════════════════════════════════════════════════════════════════
+   11. RESPONSIVE — Hero en móvil
+════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 600px) {
+
+  .vnd-hero { min-height: 280px; }
+
+  .vnd-hero__content {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1rem;
+    padding-bottom: 1.5rem;
+  }
+
+  .vnd-hero__cover-wrapper { width: 110px; }
+
+  .vnd-hero__cover,
+  .vnd-hero__cover-skeleton {
+    width: 110px;
+    height: 154px;
+  }
+
+  .vnd-status-panel__options { gap: 0.4rem; }
+
+  .vnd-status-btn {
+    font-size: 0.75rem;
+    padding: 0.4rem 0.75rem;
+  }
+}
+
+@media (max-width: 380px) {
+
+  .vnd-hero__cover-wrapper { display: none; }
+
+  .vnd-status-panel__options { flex-direction: column; }
+
+  .vnd-status-btn { width: 100%; justify-content: center; }
+}
+
+
+/* ════════════════════════════════════════════════════════════════
+   12. ACCESIBILIDAD
+════════════════════════════════════════════════════════════════ */
+
+.vnd-status-btn:focus-visible,
+.vnd-carousel__btn:focus-visible,
+.vnd-tag-pill:focus-visible,
+.vnd-carousel-card__link:focus-visible,
+.vh-card__title-link:focus-visible {
+  outline: 2px solid var(--vh-border-focus);
+  outline-offset: 3px;
+}

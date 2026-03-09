@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VN-Hub — Tu Biblioteca de Visual Novels</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
+
+  <link rel="stylesheet" href="assets/css/vn-hub.css" />
+  <link rel="stylesheet" href="assets/css/vn-hub-components.css" />
+</head>
+
+<body>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       HEADER
+  ═══════════════════════════════════════════════════════════════ -->
+  <header class="vh-header">
+    <div class="vh-container vh-header__inner">
+
+      <!-- Identidad -->
+      <div class="vh-header__brand">
+        <span class="vh-header__logo" aria-hidden="true">✦</span>
+        <h1 class="vh-header__title">VN<span class="vh-header__accent">Hub</span></h1>
+        <p class="vh-header__tagline">Tu biblioteca personal de Visual Novels</p>
+      </div>
+
+      <!-- Controles globales -->
+      <div class="vh-header__controls">
+
+        <!--
+          AUTH CONTAINER
+          auth-controller.js inyecta aquí el botón de login
+          o el menú de usuario según el estado de autenticación.
+        -->
+        <div id="authContainer" class="vh-auth-container"></div>
+
+        <!-- Botón toggle tema -->
+        <button
+          class="vh-theme-toggle"
+          id="themeToggle"
+          aria-label="Cambiar entre modo claro y oscuro"
+          title="Cambiar tema"
+        >
+          <span class="vh-theme-toggle__icon" aria-hidden="true"></span>
+        </button>
+
+      </div>
+
+    </div>
+  </header>
+
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       NAVEGACIÓN PRINCIPAL
+  ═══════════════════════════════════════════════════════════════ -->
+  <nav class="vh-main-nav" role="navigation" aria-label="Navegación principal">
+    <div class="vh-container">
+      <ul class="vh-nav__list" role="list">
+
+        <li>
+          <button
+            class="vh-nav__btn vh-nav__btn--active"
+            id="navSearch"
+            data-view="search"
+            aria-current="page"
+          >
+            <span aria-hidden="true">🔍</span> Buscar
+          </button>
+        </li>
+
+        <li>
+          <button
+            class="vh-nav__btn"
+            id="navLibrary"
+            data-view="library"
+          >
+            <span aria-hidden="true">📚</span> Mi Biblioteca
+          </button>
+        </li>
+
+        <!-- TAB FEED — visible solo si hay sesión activa (auth-controller lo muestra/oculta) -->
+        <li id="navFeedItem" hidden>
+          <button
+            class="vh-nav__btn"
+            id="navFeed"
+            data-view="feed"
+          >
+            <span aria-hidden="true">🌐</span> Comunidad
+          </button>
+        </li>
+
+      </ul>
+    </div>
+  </nav>
+
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       VISTA: BUSCADOR
+  ═══════════════════════════════════════════════════════════════ -->
+  <main class="vh-view" id="viewSearch" data-view="search">
+    <div class="vh-container">
+
+      <section class="vh-section-header">
+        <h2 class="vh-section-title">Buscar Visual Novels</h2>
+        <p class="vh-section-subtitle">Explora el catálogo</p>
+      </section>
+
+      <div class="vh-search-bar" role="search">
+        <label class="vh-sr-only" for="searchInput">Buscar novela visual</label>
+        <div class="vh-search-bar__wrapper">
+          <span class="vh-search-bar__icon" aria-hidden="true">✦</span>
+          <input
+            class="vh-search-bar__input"
+            id="searchInput"
+            type="search"
+            placeholder="Busca por título… ej: Steins;Gate, Clannad, Fate…"
+            autocomplete="off"
+            spellcheck="false"
+            minlength="2"
+            aria-label="Buscar visual novel por título"
+          />
+          <button class="vh-search-bar__clear" id="searchClear" aria-label="Limpiar búsqueda" hidden>✕</button>
+        </div>
+      </div>
+
+      <div class="vh-search-state" id="searchState" aria-live="polite">
+        <div class="vh-search-state__idle">
+          <p class="vh-search-state__hint">Escribe al menos 2 caracteres para buscar</p>
+        </div>
+      </div>
+
+      <div class="vh-cards-grid" id="searchResults" role="list" aria-label="Resultados de búsqueda"></div>
+
+      <div class="vh-pagination" id="searchPagination" hidden>
+        <button class="vh-btn vh-btn--ghost" id="prevPage" aria-label="Página anterior">← Anterior</button>
+        <span class="vh-pagination__info" id="pageInfo"></span>
+        <button class="vh-btn vh-btn--primary" id="nextPage" aria-label="Página siguiente">Siguiente →</button>
+      </div>
+
+    </div>
+  </main>
+
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       VISTA: BIBLIOTECA PERSONAL
+  ═══════════════════════════════════════════════════════════════ -->
+  <main class="vh-view vh-view--hidden" id="viewLibrary" data-view="library" hidden>
+    <div class="vh-container">
+
+      <section class="vh-section-header">
+        <h2 class="vh-section-title">Mi Biblioteca</h2>
+        <div class="vh-library-stats" id="libraryStats" aria-live="polite"></div>
+      </section>
+
+      <div class="vh-tabs" role="tablist" aria-label="Filtrar biblioteca por estado">
+
+        <button class="vh-tab vh-tab--active" role="tab" aria-selected="true"
+          aria-controls="tabpanel-all" id="tab-all" data-status="all">
+          <span class="vh-tab__icon" aria-hidden="true">📖</span>
+          <span class="vh-tab__label">Todos</span>
+          <span class="vh-tab__count" id="count-all">0</span>
+        </button>
+
+        <button class="vh-tab" role="tab" aria-selected="false"
+          aria-controls="tabpanel-pending" id="tab-pending" data-status="pending">
+          <span class="vh-tab__icon" aria-hidden="true">📌</span>
+          <span class="vh-tab__label">Pendiente</span>
+          <span class="vh-tab__count" id="count-pending">0</span>
+        </button>
+
+        <button class="vh-tab" role="tab" aria-selected="false"
+          aria-controls="tabpanel-playing" id="tab-playing" data-status="playing">
+          <span class="vh-tab__icon" aria-hidden="true">🎮</span>
+          <span class="vh-tab__label">Jugando</span>
+          <span class="vh-tab__count" id="count-playing">0</span>
+        </button>
+
+        <button class="vh-tab" role="tab" aria-selected="false"
+          aria-controls="tabpanel-finished" id="tab-finished" data-status="finished">
+          <span class="vh-tab__icon" aria-hidden="true">🏆</span>
+          <span class="vh-tab__label">Finalizado</span>
+          <span class="vh-tab__count" id="count-finished">0</span>
+        </button>
+
+        <button class="vh-tab" role="tab" aria-selected="false"
+          aria-controls="tabpanel-dropped" id="tab-dropped" data-status="dropped">
+          <span class="vh-tab__icon" aria-hidden="true">❌</span>
+          <span class="vh-tab__label">Abandonada</span>
+          <span class="vh-tab__count" id="count-dropped">0</span>
+        </button>
+
+      </div>
+
+      <div class="vh-tabpanel" id="tabpanel-all" role="tabpanel" aria-labelledby="tab-all" aria-live="polite">
+        <div class="vh-cards-grid" data-panel-grid="all" role="list"></div>
+        <div class="vh-empty-state" data-empty="all" hidden>
+          <p class="vh-empty-state__text">Tu biblioteca está vacía. ¡Empieza buscando una VN!</p>
+          <button class="vh-btn vh-btn--primary" data-go-search>🔍 Buscar novelas</button>
+        </div>
+      </div>
+
+      <div class="vh-tabpanel vh-tabpanel--hidden" id="tabpanel-pending" role="tabpanel"
+        aria-labelledby="tab-pending" aria-live="polite" hidden>
+        <div class="vh-cards-grid" data-panel-grid="pending" role="list"></div>
+        <div class="vh-empty-state" data-empty="pending" hidden>
+          <p class="vh-empty-state__text">No tienes novelas pendientes.</p>
+        </div>
+      </div>
+
+      <div class="vh-tabpanel vh-tabpanel--hidden" id="tabpanel-playing" role="tabpanel"
+        aria-labelledby="tab-playing" aria-live="polite" hidden>
+        <div class="vh-cards-grid" data-panel-grid="playing" role="list"></div>
+        <div class="vh-empty-state" data-empty="playing" hidden>
+          <p class="vh-empty-state__text">No estás jugando ninguna VN actualmente.</p>
+        </div>
+      </div>
+
+      <div class="vh-tabpanel vh-tabpanel--hidden" id="tabpanel-finished" role="tabpanel"
+        aria-labelledby="tab-finished" aria-live="polite" hidden>
+        <div class="vh-cards-grid" data-panel-grid="finished" role="list"></div>
+        <div class="vh-empty-state" data-empty="finished" hidden>
+          <p class="vh-empty-state__text">Aún no has finalizado ninguna VN.</p>
+        </div>
+      </div>
+
+      <div class="vh-tabpanel vh-tabpanel--hidden" id="tabpanel-dropped" role="tabpanel"
+        aria-labelledby="tab-dropped" aria-live="polite" hidden>
+        <div class="vh-cards-grid" data-panel-grid="dropped" role="list"></div>
+        <div class="vh-empty-state" data-empty="dropped" hidden>
+          <p class="vh-empty-state__text">No has abandonado ninguna VN.</p>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       VISTA: FEED DE COMUNIDAD
+       Visible solo para usuarios autenticados con perfil público.
+  ═══════════════════════════════════════════════════════════════ -->
+  <main class="vh-view vh-view--hidden" id="viewFeed" data-view="feed" hidden>
+    <div class="vh-container">
+
+      <section class="vh-section-header">
+        <h2 class="vh-section-title">Comunidad</h2>
+        <p class="vh-section-subtitle">Últimas reseñas de la comunidad</p>
+      </section>
+
+      <div class="vh-feed" id="feedList" aria-live="polite">
+        <!-- Renderizado dinámico por feed-controller.js (próxima fase) -->
+      </div>
+
+    </div>
+  </main>
+
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       MENÚ FLOTANTE: AÑADIR / CAMBIAR ESTADO
+  ═══════════════════════════════════════════════════════════════ -->
+  <div class="vh-status-menu" id="statusMenu" role="menu"
+    aria-label="Seleccionar estado para la biblioteca" hidden>
+    <p class="vh-status-menu__title">Añadir a biblioteca como:</p>
+    <ul class="vh-status-menu__list" role="none">
+      <li role="none">
+        <button class="vh-status-menu__option vh-status-menu__option--pending"
+          role="menuitem" data-status="pending">
+          <span aria-hidden="true">📌</span> Pendiente
+        </button>
+      </li>
+      <li role="none">
+        <button class="vh-status-menu__option vh-status-menu__option--playing"
+          role="menuitem" data-status="playing">
+          <span aria-hidden="true">🎮</span> Jugando
+        </button>
+      </li>
+      <li role="none">
+        <button class="vh-status-menu__option vh-status-menu__option--finished"
+          role="menuitem" data-status="finished">
+          <span aria-hidden="true">🏆</span> Finalizado
+        </button>
+      </li>
+      <li role="none">
+        <button class="vh-status-menu__option vh-status-menu__option--dropped"
+          role="menuitem" data-status="dropped">
+          <span aria-hidden="true">❌</span> Abandonada
+        </button>
+      </li>
+    </ul>
+  </div>
+
+  <div class="vh-overlay" id="menuOverlay" hidden aria-hidden="true"></div>
+
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       TOAST DE NOTIFICACIONES
+  ═══════════════════════════════════════════════════════════════ -->
+  <div class="vh-toast" id="toast" role="status"
+    aria-live="polite" aria-atomic="true" hidden>
+    <span class="vh-toast__icon" aria-hidden="true"></span>
+    <span class="vh-toast__message"></span>
+  </div>
+
+
+  <!--
+    SCRIPTS
+    Orden importante:
+    1. app-init.js     — bootstrap (LibraryStore + ThemeManager)
+    2. auth-controller — Auth Firebase (depende del store ya inicializado)
+    3. render-engine   — funciones puras de DOM
+    4. ui-controller   — eventos y coordinación
+  -->
+  <script type="module" src="js/app-init.js"></script>
+  <script type="module" src="js/auth-controller.js"></script>
+  <script type="module" src="js/render-engine.js"></script>
+  <script type="module" src="js/ui-controller.js"></script>
+  <script type="module" src="js/feed-controller.js"></script>
+
+
+</body>
+</html>
