@@ -1408,3 +1408,164 @@ body::before {
 .vh-card__edit-btn:active {
   transform: translateY(1px);
 }
+
+/* ────────────────────────────────────────────────────────────────
+   20. MODAL DE ELIMINACIÓN + FIX FOOTER DROPPED
+──────────────────────────────────────────────────────────────── */
+
+.vh-modal--sm { max-width: 420px; }
+
+.vh-btn--danger {
+  background:   var(--vh-danger);
+  color:        #ffffff;
+  border-color: var(--vh-danger);
+  box-shadow:   0 4px 16px rgba(239, 68, 68, 0.35);
+}
+.vh-btn--danger:hover {
+  background:   #dc2626;
+  border-color: #dc2626;
+  transform:    translateY(-2px);
+  box-shadow:   0 6px 24px rgba(239, 68, 68, 0.52);
+}
+.vh-btn--danger:active { transform: translateY(0); }
+
+.vh-delete-modal__header-left {
+  display:     flex;
+  align-items: flex-start;
+  gap:         0.75rem;
+  flex:        1;
+  min-width:   0;
+}
+
+.vh-delete-modal__icon-wrap {
+  flex-shrink:     0;
+  width:           44px;
+  height:          44px;
+  border-radius:   var(--vh-radius-md);
+  background:      var(--vh-danger-bg);
+  border:          1.5px solid rgba(239, 68, 68, 0.25);
+  display:         flex;
+  align-items:     center;
+  justify-content: center;
+  font-size:       1.3rem;
+}
+[data-theme="dark"] .vh-delete-modal__icon-wrap {
+  background:   rgba(248, 113, 113, 0.12);
+  border-color: rgba(248, 113, 113, 0.28);
+}
+
+.vh-delete-modal__content-card {
+  display:       flex;
+  gap:           1rem;
+  align-items:   flex-start;
+  padding:       1rem;
+  background:    var(--vh-danger-bg);
+  border:        1.5px solid rgba(239, 68, 68, 0.18);
+  border-radius: var(--vh-radius-lg);
+}
+[data-theme="dark"] .vh-delete-modal__content-card {
+  background:   rgba(248, 113, 113, 0.07);
+  border-color: rgba(248, 113, 113, 0.22);
+}
+
+.vh-delete-modal__cover {
+  width:          56px;
+  height:         80px;
+  object-fit:     cover;
+  object-position:top center;
+  border-radius:  var(--vh-radius-sm);
+  border:         1.5px solid var(--vh-border);
+  flex-shrink:    0;
+}
+.vh-delete-modal__cover[hidden] { display: none; }
+
+.vh-delete-modal__text-block {
+  display:        flex;
+  flex-direction: column;
+  gap:            0.4rem;
+  flex:           1;
+  min-width:      0;
+}
+
+.vh-delete-modal__vn-title {
+  font-size:     0.9rem;
+  font-weight:   700;
+  color:         var(--vh-text-primary);
+  display:       block;
+  overflow:      hidden;
+  text-overflow: ellipsis;
+  white-space:   nowrap;
+}
+
+.vh-delete-modal__msg {
+  font-size:   0.82rem;
+  color:       var(--vh-text-secondary);
+  line-height: 1.5;
+}
+
+.vh-delete-modal__warning-pill {
+  display:       inline-flex;
+  align-items:   center;
+  gap:           0.35rem;
+  padding:       0.3rem 0.65rem;
+  border-radius: var(--vh-radius-full);
+  background:    rgba(239, 68, 68, 0.10);
+  border:        1px solid rgba(239, 68, 68, 0.28);
+  color:         var(--vh-danger);
+  font-size:     0.75rem;
+  font-weight:   600;
+  width:         fit-content;
+  margin-top:    0.2rem;
+}
+[data-theme="dark"] .vh-delete-modal__warning-pill {
+  background:   rgba(248, 113, 113, 0.12);
+  border-color: rgba(248, 113, 113, 0.32);
+  color:        #f87171;
+}
+
+
+/* ── FIX: botón eliminar siempre visible en sección "Abandonada" ── */
+
+/*
+ * Problema: footer de card con edit-btn (flex:1) + change-btn (flex:1)
+ * + remove-btn (32px fijo) en un contenedor de ~160-200px.
+ * Solución: el edit-btn ocupa fila completa; change + remove comparten la siguiente.
+ */
+.vh-card__footer {
+  flex-wrap: wrap;
+  overflow:  visible;       /* evita que remove-btn sea cortado */
+}
+
+/* Fila 1: el edit-btn solo */
+.vh-card__footer .vh-card__edit-btn {
+  flex:          1 1 100%;  /* ancho completo → nueva fila */
+  min-width:     0;
+  white-space:   nowrap;
+  overflow:      hidden;
+  text-overflow: ellipsis;
+}
+
+/* Fila 2: change-btn + remove-btn */
+.vh-card__footer .vh-card__change-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.vh-card__footer .vh-card__remove-btn {
+  flex-shrink: 0;          /* nunca se comprime */
+  width:       auto;
+  min-width:   36px;
+  min-height:  36px;
+  padding:     0 0.6rem;   /* área táctil cómoda */
+}
+
+/* Accesibilidad: focus para el botón danger */
+.vh-btn--danger:focus-visible {
+  outline:        2px solid var(--vh-danger);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vh-delete-modal__content-card,
+  .vh-btn--danger { transition: none; }
+}

@@ -3,14 +3,18 @@
 /**
  * @file js/ui-controller.js
  * @description Controlador principal de la UI de VN-Hub.
- *              Versión 2: integra modales de review, log y comment
- *              al flujo de cambio de estado.
+ *              Versión 3: reemplaza window.confirm() por modal glassmorphism
+ *              para la confirmación de eliminación de VN.
+ *
+ * CAMBIOS v3:
+ *  - _confirmAndRemove() delega al nuevo módulo ModalDelete.
+ *  - Se agrega _executeRemove() por SRP (UI vs. lógica de datos).
+ *  - Import de modal-delete.js.
  *
  * CAMBIOS v2:
  *  - _applyStatusSelection() abre el modal correspondiente
  *    según el nuevo estado seleccionado.
  *  - Se importan los tres módulos de modales.
- *  - El resto de la lógica permanece igual.
  */
 
 import * as VndbService   from './vndb-service.js';
@@ -19,6 +23,7 @@ import * as RenderEngine  from './render-engine.js';
 import * as ModalReview   from './modal-review.js';
 import * as ModalLog      from './modal-log.js';
 import * as ModalComment  from './modal-comment.js';
+import * as ModalDelete   from './modal-delete.js';
 import { VN_STATUS, VN_STATUS_META, TOAST_DURATION_MS } from './constants.js';
 import { ThemeManager }   from './app-init.js';
 import * as FirebaseService from './firebase-service.js';
@@ -677,40 +682,52 @@ function _handleLibraryClick(e) {
 }
 
 /**
- * Solicita confirmación al usuario y elimina la VN de la biblioteca.
+ * Solicita confirmación al usuario mediante el modal glassmorphism
+ * y elimina la VN de la biblioteca si el usuario confirma.
  *
- * FLUJO DE ELIMINACIÓN (corregido):
- *  1. Confirmación nativa del navegador (window.confirm).
- *  2. LibraryStore.removeVn(vnId) → persiste en localStorage y
+ * FLUJO DE ELIMINACIÓN (v3):
+ *  1. ModalDelete.open() muestra el diálogo de confirmación.
+ *  2. Si confirma → _executeRemove(vnId).
+ *  3. LibraryStore.removeVn(vnId) persiste en localStorage y
  *     emite evento 'remove' con payload { vnId }.
- *  3. FirebaseSync (app-init.js) intercepta 'remove' vía Observer
+ *  4. FirebaseSync (app-init.js) intercepta 'remove' vía Observer
  *     y llama a deleteLibraryEntry + removeFromFeed en Firestore.
- *  4. Toast de confirmación al usuario.
+ *  5. Toast de confirmación al usuario.
  *
  * NOTA: La sincronización con Firestore la gestiona FirebaseSync de
- * forma desacoplada. _confirmAndRemove solo coordina la UI y el store.
- * Si Firestore falla, el error queda logueado en la consola pero NO
- * bloquea la UI (el estado local ya se actualizó correctamente).
+ * forma desacoplada. Si Firestore falla, el error queda logueado en
+ * consola pero NO bloquea la UI (estado local ya actualizado).
  *
  * @param {string} vnId - ID de VNDB de la novela a eliminar.
  */
 function _confirmAndRemove(vnId) {
-  // Validación defensiva: vnId debe existir en caché
-  const title = _state.vnCache.get(vnId)?.title ?? vnId;
+  const vnEntry = _state.vnCache.get(vnId);
+  const title   = vnEntry?.title    ?? vnId;
+  const imgUrl  = vnEntry?.imageUrl ?? '';
 
-  const confirmed = window.confirm(
-    `¿Eliminar "${title}" de tu biblioteca?\nEsta acción no se puede deshacer.`
-  );
-  if (!confirmed) return;
+  // Delega la UI de confirmación a ModalDelete (SRP: controlador de UI)
+  ModalDelete.open(vnId, title, imgUrl, () => _executeRemove(vnId));
+}
 
+/**
+ * Ejecuta la eliminación real de la VN tras la confirmación del usuario.
+ * Separado de _confirmAndRemove por el principio de Responsabilidad Única:
+ * _confirmAndRemove gestiona el flujo UI; _executeRemove gestiona los datos.
+ *
+ * NOTA: La sincronización Firestore ocurre automáticamente vía el Observer
+ * de LibraryStore → FirebaseSync en app-init.js.
+ *
+ * @param {string} vnId - ID de VNDB de la novela a eliminar.
+ */
+function _executeRemove(vnId) {
+  const title      = _state.vnCache.get(vnId)?.title ?? vnId;
   const wasRemoved = LibraryStore.removeVn(vnId);
 
   if (wasRemoved) {
-    // FirebaseSync recibe el evento 'remove' y sincroniza con Firestore
     _showToast(`"${title}" eliminada de la biblioteca`, 'success');
   } else {
-    // La entrada ya no existía (caso borde: doble-click rápido)
-    console.warn(`[UI] removeVn("${vnId}") devolvió false — la entrada no existía.`);
+    // Caso borde: doble-click rápido / entrada ya inexistente
+    console.warn(`[UI] removeVn("${vnId}") devolvió false — entrada no encontrada.`);
   }
 }
 
