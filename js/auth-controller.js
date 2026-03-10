@@ -408,24 +408,77 @@ function _closeDropdown(trigger, dropdown) {
 // ════════════════════════════════════════════════════════
 
 /**
- * Al iniciar sesión, sincroniza los datos locales con Firestore.
- * Estrategia: merge (los datos de Firestore tienen prioridad).
+ * Al iniciar sesión, sincroniza la biblioteca local con Firestore.
  *
- * @param {string} uid
+ * ESTRATEGIA: Firestore tiene prioridad (source of truth en la nube).
+ *
+ * CORRECCIÓN BUG «Score/review perdido tras login»:
+ *   Antes se usaba LibraryStore.addVn(entry.vnId, entry.status), que crea
+ *   una entrada con todos los campos en valores por defecto, descartando
+ *   el score, la review, el log y el resto de campos guardados en Firestore.
+ *
+ *   Ahora se usa LibraryStore.addVn() solo para registrar la entrada con su
+ *   estado correcto, y luego se restauran los campos avanzados (score, review,
+ *   favRoute, isSpoiler, log, comment) con las funciones de actualización
+ *   específicas de cada estado.
+ *
+ * @param {string} uid - UID del usuario autenticado.
  */
 async function _syncLibraryOnLogin(uid) {
   try {
+    // 1. Subir entradas locales que aún no están en Firestore
     const localEntries = LibraryStore.getEntriesByStatus(null);
     if (localEntries.length > 0) {
       const uploaded = await FirebaseService.uploadLibraryBatch(localEntries);
       console.info(`[AuthController] ${uploaded} entradas locales subidas a Firestore para ${uid}.`);
     }
+
+    // 2. Cargar la biblioteca completa desde la nube
     const cloudEntries = await FirebaseService.loadLibraryFromCloud();
+
+    // 3. Limpiar el store local antes de repoblarlo
     LibraryStore.clearAll();
+
+    // 4. Restaurar CADA entrada con TODOS sus campos (no solo status)
     cloudEntries.forEach(entry => {
+      if (!entry?.vnId || !entry?.status) return;
+
+      // 4a. Crear la entrada base con el estado correcto
       LibraryStore.addVn(entry.vnId, entry.status);
+
+      // 4b. Restaurar campos específicos de FINISHED (score, review, favRoute)
+      if (entry.status === 'finished' && entry.score?.finalScore != null) {
+        try {
+          LibraryStore.updateReview(entry.vnId, entry.score, {
+            favRoute:  entry.favRoute  ?? '',
+            review:    entry.review    ?? '',
+            isSpoiler: Boolean(entry.isSpoiler),
+          });
+        } catch (e) {
+          console.warn(`[AuthController] No se pudo restaurar review de "${entry.vnId}":`, e);
+        }
+      }
+
+      // 4c. Restaurar bitácora de PLAYING (log)
+      if (entry.status === 'playing' && entry.log) {
+        try {
+          LibraryStore.updateLog(entry.vnId, entry.log);
+        } catch (e) {
+          console.warn(`[AuthController] No se pudo restaurar log de "${entry.vnId}":`, e);
+        }
+      }
+
+      // 4d. Restaurar comentario de DROPPED (comment)
+      if (entry.status === 'dropped' && entry.comment) {
+        try {
+          LibraryStore.updateComment(entry.vnId, entry.comment);
+        } catch (e) {
+          console.warn(`[AuthController] No se pudo restaurar comment de "${entry.vnId}":`, e);
+        }
+      }
     });
-    console.info(`[AuthController] Biblioteca restaurada desde la nube (${cloudEntries.length}).`);
+
+    console.info(`[AuthController] Biblioteca restaurada desde la nube (${cloudEntries.length} entradas).`);
 
   } catch (err) {
     console.error('[AuthController] Error en sincronización:', err);

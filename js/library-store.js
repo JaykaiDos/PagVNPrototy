@@ -552,15 +552,25 @@ function updateReview(vnId, score, { favRoute = '', review = '', isSpoiler = fal
  *   const deleted = removeVn('v17');
  *   console.log(deleted ? 'Eliminada ✓' : 'No existía'); // Eliminada ✓
  *   console.log(getEntry('v17')); // null
+ *
+ * NOTA DE DISEÑO:
+ *   El payload del evento 'remove' es { vnId } (objeto), NO el string
+ *   directamente. Esto mantiene consistencia con los eventos 'add' y
+ *   'update', y permite que FirebaseSync acceda a payload?.vnId
+ *   de forma uniforme en todos los casos.
  */
 function removeVn(vnId) {
   _assertInitialized();
+  _validateVnId(vnId);
 
   if (!_library.has(vnId)) return false;
 
   _library.delete(vnId);
   _saveToStorage();
-  _notify('remove', vnId);
+
+  // Payload como objeto { vnId } para consistencia con 'add'/'update'.
+  // FirebaseSync (app-init.js) consume payload.vnId en todos los eventos.
+  _notify('remove', { vnId });
 
   return true;
 }

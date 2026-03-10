@@ -42,6 +42,7 @@ import {
   isNonEmptyString,
   stripBbCode,
 } from './utils.js';
+import { translateTags } from './translation-tags.js';
 
 
 // ─────────────────────────────────────────────
@@ -257,7 +258,7 @@ function _transformVn(rawVn) {
     rating:        formatVndbRating(vn.rating),
     votecount:     vn.votecount     ?? 0,
     duration:      formatDuration(vn.length_minutes),
-    tags:          _extractTopTags(vn.tags ?? [], 10),
+    tags:          translateTags(_extractTopTags(vn.tags ?? [], 10)),
     developers:    (vn.developers ?? []).map(d => d.name).filter(Boolean),
   };
 }

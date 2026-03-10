@@ -279,6 +279,17 @@ function _activateTab(tabStatus) {
   });
 }
 
+/**
+ * Renderiza todos los paneles de la biblioteca.
+ *
+ * CORRECCIÓN BUG «Finalizado vacío»:
+ *   El panel 'finished' ahora usa getEntriesByStatus(VN_STATUS.FINISHED)
+ *   en lugar de getRankedFinished(). Motivo: getRankedFinished() filtra
+ *   exclusivamente entradas con score !== null, por lo que VNs marcadas
+ *   como "Finalizado" sin review completa desaparecían del panel.
+ *   getEntriesByStatus muestra TODAS las finalizadas; las que tienen score
+ *   aparecen con ranking, las que no con badge de «pendiente de reseña».
+ */
 function _renderLibrary() {
   const stats = LibraryStore.getStats();
   RenderEngine.updateTabCounts(stats);
@@ -287,7 +298,8 @@ function _renderLibrary() {
   _renderPanel('all',      LibraryStore.getEntriesByStatus(null));
   _renderPanel('pending',  LibraryStore.getEntriesByStatus(VN_STATUS.PENDING));
   _renderPanel('playing',  LibraryStore.getEntriesByStatus(VN_STATUS.PLAYING));
-  _renderPanel('finished', LibraryStore.getRankedFinished());
+  // ► Corrección: todas las finalizadas, con o sin score calculado
+  _renderPanel('finished', LibraryStore.getEntriesByStatus(VN_STATUS.FINISHED));
   _renderPanel('dropped',  LibraryStore.getEntriesByStatus(VN_STATUS.DROPPED));
 }
 
@@ -664,14 +676,42 @@ function _handleLibraryClick(e) {
   }
 }
 
+/**
+ * Solicita confirmación al usuario y elimina la VN de la biblioteca.
+ *
+ * FLUJO DE ELIMINACIÓN (corregido):
+ *  1. Confirmación nativa del navegador (window.confirm).
+ *  2. LibraryStore.removeVn(vnId) → persiste en localStorage y
+ *     emite evento 'remove' con payload { vnId }.
+ *  3. FirebaseSync (app-init.js) intercepta 'remove' vía Observer
+ *     y llama a deleteLibraryEntry + removeFromFeed en Firestore.
+ *  4. Toast de confirmación al usuario.
+ *
+ * NOTA: La sincronización con Firestore la gestiona FirebaseSync de
+ * forma desacoplada. _confirmAndRemove solo coordina la UI y el store.
+ * Si Firestore falla, el error queda logueado en la consola pero NO
+ * bloquea la UI (el estado local ya se actualizó correctamente).
+ *
+ * @param {string} vnId - ID de VNDB de la novela a eliminar.
+ */
 function _confirmAndRemove(vnId) {
-  const title     = _state.vnCache.get(vnId)?.title ?? vnId;
+  // Validación defensiva: vnId debe existir en caché
+  const title = _state.vnCache.get(vnId)?.title ?? vnId;
+
   const confirmed = window.confirm(
     `¿Eliminar "${title}" de tu biblioteca?\nEsta acción no se puede deshacer.`
   );
   if (!confirmed) return;
-  LibraryStore.removeVn(vnId);
-  _showToast(`"${title}" eliminada de la biblioteca`, 'success');
+
+  const wasRemoved = LibraryStore.removeVn(vnId);
+
+  if (wasRemoved) {
+    // FirebaseSync recibe el evento 'remove' y sincroniza con Firestore
+    _showToast(`"${title}" eliminada de la biblioteca`, 'success');
+  } else {
+    // La entrada ya no existía (caso borde: doble-click rápido)
+    console.warn(`[UI] removeVn("${vnId}") devolvió false — la entrada no existía.`);
+  }
 }
 
 function _openStatusModal(vnId) {
