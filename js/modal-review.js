@@ -468,6 +468,8 @@ async function _handleSave() {
       }).catch(err => console.warn('[ModalReview] No se pudo publicar en feed:', err));
     }
 
+    // Restaurar botón antes de cerrar para que el modal quede limpio al reutilizarse
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 Guardar clasificación'; }
     close();
 
   } catch (err) {
@@ -495,6 +497,12 @@ function open(vnId, vnTitle, vnImageUrl = '') {
   _state.vnId       = vnId;
   _state.vnTitle    = vnTitle;
   _state.vnImageUrl = vnImageUrl;
+
+  // Garantizar que el botón esté siempre habilitado al abrir el modal.
+  // Failsafe contra el estado "Guardando…" persistente cuando el modal
+  // singleton se reutiliza tras una operación anterior exitosa o fallida.
+  const saveBtn = document.getElementById('modalReviewSave');
+  if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 Guardar clasificación'; }
 
   // Actualizar subtítulo con el nombre de la VN
   const subtitle = document.getElementById('modalReviewSubtitle');

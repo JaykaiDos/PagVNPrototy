@@ -793,10 +793,15 @@ function _openStatusModal(vnId) {
 
     // Cerrar al click fuera
     overlay.addEventListener('click', _closeStatusModal);
-    // Cerrar con Escape
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && !overlay.hidden) _closeStatusModal();
-    });
+
+    // Cerrar con Escape — registrado una sola vez en document para evitar
+    // acumulación de listeners si el modal se recrea en futuros ciclos de vida.
+    if (!overlay.dataset.escBound) {
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !overlay.hidden) _closeStatusModal();
+      });
+      overlay.dataset.escBound = 'true';
+    }
   }
 
   // Si el modal existe pero no está dentro del overlay, moverlo
