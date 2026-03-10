@@ -180,39 +180,69 @@ function _renderHero(vn) {
 
   // ── Portada principal ──
   if (vn.imageUrl && _dom.heroCover) {
-    const COVER_TIMEOUT_MS = 2000;
     let coverSettled = false;
-    const coverTimer = setTimeout(() => {
+    const COVER_TIMEOUT_MS = 2000;
+
+    /**
+     * Único punto de resolución del skeleton de portada.
+     * Se llama exactamente una vez (guard coverSettled).
+     * @param {boolean} ok
+     */
+    const onCoverDone = (ok) => {
       if (coverSettled) return;
       coverSettled = true;
-      if (_dom.coverSkeleton) {
-        _dom.coverSkeleton.textContent = '📖';
-        _dom.coverSkeleton.classList.add('vnd-hero__cover-placeholder');
+      clearTimeout(coverTimer);
+      if (ok) {
+        if (_dom.coverSkeleton) _dom.coverSkeleton.hidden = true;
+        _dom.heroCover.hidden = false;
+      } else {
+        if (_dom.coverSkeleton) {
+          _dom.coverSkeleton.textContent = '📖';
+          _dom.coverSkeleton.classList.add('vnd-hero__cover-placeholder');
+        }
       }
-    }, COVER_TIMEOUT_MS);
+    };
 
-    _dom.heroCover.setAttribute('src', vn.imageUrl);
+    // Timeout: skeleton no queda infinito si la imagen no responde
+    const coverTimer = setTimeout(() => onCoverDone(false), COVER_TIMEOUT_MS);
+
+    // ── FIX RACE CONDITION CON CACHÉ ─────────────────────────────────
+    // CAUSA: src se asignaba ANTES de registrar onload/onerror.
+    // Con imágenes en caché, el evento load se dispara SINCRÓNICAMENTE
+    // durante setAttribute('src'), antes de que el listener exista.
+    // El skeleton nunca recibe hidden=true aunque la portada ya cargó.
+    //
+    // SOLUCIÓN (4 pasos en orden obligatorio):
+    //  1. Limpiar listeners y resetear src (evita que src idéntico
+    //     no redispare onload en segunda visita a la misma VN).
+    //  2. Registrar onload/onerror ANTES de asignar src.
+    //  3. Asignar src DESPUÉS de los listeners.
+    //  4. Verificar img.complete post-asignación como guardia final.
+    // ────────────────────────────────────────────────────────────────
+
+    // Paso 1: reset limpio del elemento reutilizado
+    _dom.heroCover.onload  = null;
+    _dom.heroCover.onerror = null;
+    _dom.heroCover.removeAttribute('src');
+
+    // Paso 2: listeners PRIMERO
+    _dom.heroCover.onload  = () => onCoverDone(true);
+    _dom.heroCover.onerror = () => onCoverDone(false);
+
+    // Paso 3: src DESPUÉS de los listeners
     _dom.heroCover.setAttribute('alt', vn.title);
+    _dom.heroCover.setAttribute('src', vn.imageUrl);
 
-    _dom.heroCover.onload = () => {
-      if (coverSettled) return;
-      coverSettled = true;
-      clearTimeout(coverTimer);
-      if (_dom.coverSkeleton) _dom.coverSkeleton.hidden = true;
-      _dom.heroCover.hidden = false;
-    };
+    // Paso 4: guardia post-asignación
+    // img.complete === true significa que la carga ya terminó antes
+    // de que nuestro listener se registrara (caché agresiva).
+    // naturalWidth > 0 confirma éxito vs error 404/CORS.
+    if (_dom.heroCover.complete && !coverSettled) {
+      onCoverDone(_dom.heroCover.naturalWidth > 0);
+    }
 
-    _dom.heroCover.onerror = () => {
-      if (coverSettled) return;
-      coverSettled = true;
-      clearTimeout(coverTimer);
-      if (_dom.coverSkeleton) {
-        _dom.coverSkeleton.textContent = '📖';
-        _dom.coverSkeleton.classList.add('vnd-hero__cover-placeholder');
-      }
-    };
   } else {
-    // Sin imagen: mostramos placeholder
+    // Sin URL de imagen: placeholder directo, sin esperar
     if (_dom.coverSkeleton) {
       _dom.coverSkeleton.textContent = '📖';
       _dom.coverSkeleton.classList.add('vnd-hero__cover-placeholder');
@@ -223,31 +253,58 @@ function _renderHero(vn) {
   if (_dom.adultBadge) _dom.adultBadge.hidden = !vn.imageIsAdult;
 
   // ── Título y meta ──
+  // El skeleton del bloque de texto desaparece en cuanto tenemos datos.
   if (_dom.heroSkeleton) _dom.heroSkeleton.hidden = true;
 
   if (_dom.heroTitle) {
-    _dom.heroTitle.textContent = vn.title;
-    _dom.heroTitle.hidden = false;
+    // Fallback explícito: nunca dejamos el nodo vacío ni oculto.
+    _dom.heroTitle.textContent = vn.title || 'Sin título';
+    _dom.heroTitle.hidden      = false;
   }
 
-  if (_dom.breadcrumbTitle) _dom.breadcrumbTitle.textContent = vn.title;
-  document.title = `${vn.title} — VN-Hub`;
+  if (_dom.breadcrumbTitle) {
+    _dom.breadcrumbTitle.textContent = vn.title || 'Sin título';
+  }
+  document.title = `${vn.title || 'VN'} — VN-Hub`;
 
-  // Píldoras de metadatos
-  if (_dom.metaRating && vn.rating && vn.rating !== 'N/A') {
-    _dom.metaRating.textContent = `⭐ ${vn.rating}`;
+  // ── Píldoras de metadatos ──
+  // CORRECCIÓN: cada bloque tiene su propio else para mostrar el elemento
+  // con un valor de fallback en lugar de dejarlo en estado skeleton/hidden.
+
+  if (_dom.metaRating) {
+    if (vn.rating && vn.rating !== 'N/A') {
+      _dom.metaRating.textContent = `⭐ ${vn.rating}`;
+    } else {
+      // Sin rating: mostramos placeholder neutro para retirar el skeleton
+      _dom.metaRating.textContent = '⭐ —';
+    }
+    // Siempre revelamos el elemento — nunca lo dejamos en hidden
     _dom.metaRating.hidden = false;
   }
 
-  if (_dom.metaYear && vn.released && vn.released !== 'Fecha desconocida') {
-    const year = vn.released.match(/\d{4}/)?.[0] ?? '';
+  if (_dom.metaYear) {
+    const year = vn.released?.match(/\d{4}/)?.[0] ?? '';
     if (year) {
       _dom.metaYear.textContent = `📅 ${year}`;
+    } else {
+      // CORRECCIÓN: sin año conocido mostramos placeholder en lugar de
+      // dejar el elemento hidden con skeleton activo indefinidamente.
+      _dom.metaYear.textContent = '📅 —';
     }
+    // CORRECCIÓN CRÍTICA: faltaba esta línea — el elemento nunca
+    // salía del estado hidden aunque hubiera datos de año válidos.
+    _dom.metaYear.hidden = false;
   }
 
-  if (_dom.metaDuration && vn.duration && vn.duration !== 'Desconocida') {
-    _dom.metaDuration.textContent = `⏱ ${vn.duration}`;
+  if (_dom.metaDuration) {
+    if (vn.duration && vn.duration !== 'Desconocida') {
+      _dom.metaDuration.textContent = `⏱ ${vn.duration}`;
+    } else {
+      // CORRECCIÓN: duración desconocida → placeholder en lugar de skeleton
+      _dom.metaDuration.textContent = '⏱ —';
+    }
+    // CORRECCIÓN CRÍTICA: faltaba esta línea — igual que metaYear.
+    _dom.metaDuration.hidden = false;
   }
 
   if (_dom.heroMeta) _dom.heroMeta.hidden = false;
@@ -664,16 +721,10 @@ async function _loadVn() {
     _vnData = vn;
     _clearState();
 
-    // Renderizar secciones en orden
+    // Renderizar secciones críticas de forma SÍNCRONA e inmediata.
+    // La UI debe ser visible sin esperar ninguna promesa secundaria.
     _renderHero(vn);
-    // Traducir sinopsis al español via Cloudflare Worker (degradación graceful)
-    try {
-      const translated = await translateSynopsis(_vnId, vn.description);
-      _synopsisEs = translated ? { text: translated } : null;
-    } catch {
-      _synopsisEs = null;
-    }
-    _renderSynopsis(vn.description);
+    _renderSynopsis(vn.description);   // muestra texto en inglés de inmediato
     _renderFicha(vn);
     _renderTags(vn.tags);
 
@@ -682,6 +733,20 @@ async function _loadVn() {
 
     // Cargar similares en paralelo (no bloquea el render principal)
     _loadSimilarVns(vn);
+
+    // CORRECCIÓN: la traducción se resuelve en paralelo y actualiza la
+    // sinopsis cuando llega, sin bloquear el render inicial del hero.
+    // Antes estaba con "await" antes de _renderSynopsis, lo que retrasaba
+    // la aparición de la ficha técnica y tags hasta que la red respondía.
+    translateSynopsis(_vnId, vn.description)
+      .then(translated => {
+        _synopsisEs = translated ? { text: translated } : null;
+        // Re-renderizar solo si hay traducción — no borra el texto inglés
+        if (_synopsisEs) _renderSynopsis(vn.description);
+      })
+      .catch(() => {
+        _synopsisEs = null;
+      });
 
   } catch (err) {
     console.error('[Details] Error al cargar VN:', err);

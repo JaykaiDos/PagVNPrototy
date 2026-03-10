@@ -136,6 +136,13 @@
   font-size: 2.5rem;
 }
 
+/*
+ * FIX: .vnd-hero__cover-skeleton tiene display:flex definido explícitamente.
+ * Esto tiene mayor especificidad que el user-agent stylesheet [hidden]{display:none},
+ * por lo que el atributo hidden del HTML no funciona sin esta regla.
+ */
+.vnd-hero__cover-skeleton[hidden] { display: none !important; }
+
 .vnd-hero__cover-placeholder {
   background: rgba(255,255,255,0.08) !important;
   animation: none !important;
@@ -180,6 +187,12 @@
   display: flex;
   flex-direction: column;
 }
+
+/*
+ * FIX: igual que cover-skeleton — display:flex explícito requiere
+ * regla [hidden] explícita para que JS pueda ocultarlo con hidden=true.
+ */
+.vnd-hero__skeleton-block[hidden] { display: none !important; }
 
 .vnd-hero__title {
   font-family: 'Playfair Display', serif;
