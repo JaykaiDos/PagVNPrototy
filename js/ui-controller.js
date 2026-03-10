@@ -3,8 +3,16 @@
 /**
  * @file js/ui-controller.js
  * @description Controlador principal de la UI de VN-Hub.
- *              Versión 3: reemplaza window.confirm() por modal glassmorphism
- *              para la confirmación de eliminación de VN.
+ *              Versión 4: integración del sistema de exportación PNG por sección.
+ *
+ * CAMBIOS v4:
+ *  - Import de ModalExport (modal-export.js).
+ *  - _renderLibrary() llama a _injectExportButtons() al finalizar el render.
+ *  - _injectExportButtons(): inyecta/actualiza el botón "Exportar" en cada
+ *    tabpanel de estado (pending, playing, finished, dropped).
+ *  - _buildExportButton(): construye el <button> de exportación (SRP).
+ *  - _onExportButtonClick(): handler centralizado para todos los botones export.
+ *  - _openExportModal(): recopila datos y delega en ModalExport.open().
  *
  * CAMBIOS v3:
  *  - _confirmAndRemove() delega al nuevo módulo ModalDelete.
@@ -24,6 +32,7 @@ import * as ModalReview   from './modal-review.js';
 import * as ModalLog      from './modal-log.js';
 import * as ModalComment  from './modal-comment.js';
 import * as ModalDelete   from './modal-delete.js';
+import { ModalExport }    from './modal-export.js';
 import { VN_STATUS, VN_STATUS_META, TOAST_DURATION_MS } from './constants.js';
 import { ThemeManager }   from './app-init.js';
 import * as FirebaseService from './firebase-service.js';
@@ -285,15 +294,18 @@ function _activateTab(tabStatus) {
 }
 
 /**
- * Renderiza todos los paneles de la biblioteca.
+ * Renderiza todos los paneles de la biblioteca e inyecta los botones
+ * de exportación en cada sección de estado.
  *
  * CORRECCIÓN BUG «Finalizado vacío»:
- *   El panel 'finished' ahora usa getEntriesByStatus(VN_STATUS.FINISHED)
+ *   El panel 'finished' usa getEntriesByStatus(VN_STATUS.FINISHED)
  *   en lugar de getRankedFinished(). Motivo: getRankedFinished() filtra
  *   exclusivamente entradas con score !== null, por lo que VNs marcadas
  *   como "Finalizado" sin review completa desaparecían del panel.
  *   getEntriesByStatus muestra TODAS las finalizadas; las que tienen score
  *   aparecen con ranking, las que no con badge de «pendiente de reseña».
+ *
+ * CAMBIOS v4: Agrega llamada a _injectExportButtons(stats) al final.
  */
 function _renderLibrary() {
   const stats = LibraryStore.getStats();
@@ -306,6 +318,9 @@ function _renderLibrary() {
   // ► Corrección: todas las finalizadas, con o sin score calculado
   _renderPanel('finished', LibraryStore.getEntriesByStatus(VN_STATUS.FINISHED));
   _renderPanel('dropped',  LibraryStore.getEntriesByStatus(VN_STATUS.DROPPED));
+
+  // ► v4: Inyectar/actualizar botones de exportación en cada sección de estado
+  _injectExportButtons(stats);
 }
 
 async function _renderPanel(panelId, entries) {
@@ -352,6 +367,179 @@ async function _renderPanel(panelId, entries) {
   });
 
   grid.appendChild(fragment);
+}
+
+
+// ─────────────────────────────────────────────
+// 5b. SISTEMA DE EXPORTACIÓN PNG
+//     Funciones añadidas en v4.
+//     SRP: cada función tiene una sola responsabilidad.
+// ─────────────────────────────────────────────
+
+/**
+ * Inyecta (o actualiza) el botón "Exportar como imagen" en cada tabpanel
+ * de estado que tenga al menos una VN. Oculta el botón si la sección está vacía.
+ *
+ * ESTRATEGIA DE REUTILIZACIÓN:
+ *  El contenedor `.vh-section-actions[data-export-container]` y el botón
+ *  se crean UNA SOLA VEZ y se reutilizan en renders posteriores para
+ *  evitar memory leaks y acumulación de event listeners.
+ *
+ * @param {{ total: number, byStatus: Record<string, number> }} stats
+ *   Estadísticas actuales de la biblioteca.
+ */
+function _injectExportButtons(stats) {
+  const EXPORT_STATUSES = [
+    VN_STATUS.PENDING,
+    VN_STATUS.PLAYING,
+    VN_STATUS.FINISHED,
+    VN_STATUS.DROPPED,
+  ];
+
+  EXPORT_STATUSES.forEach(status => {
+    const panelId = `tabpanel-${status}`;
+    const panel   = document.getElementById(panelId);
+    if (!panel) return;
+
+    const count = stats.byStatus[status] ?? 0;
+
+    // Buscar o crear el contenedor de acciones (creado solo una vez por panel)
+    let actionsContainer = panel.querySelector(
+      `.vh-section-actions[data-export-container="${status}"]`
+    );
+
+    if (!actionsContainer) {
+      actionsContainer = document.createElement('div');
+      actionsContainer.className = 'vh-section-actions';
+      actionsContainer.dataset.exportContainer = status;
+      actionsContainer.setAttribute(
+        'aria-label',
+        `Acciones de la sección ${VN_STATUS_META[status].label}`,
+      );
+      // Insertar al inicio del tabpanel (antes del grid y del empty state)
+      panel.insertBefore(actionsContainer, panel.firstChild);
+    }
+
+    // Buscar o crear el botón dentro del contenedor (creado solo una vez)
+    let exportBtn = actionsContainer.querySelector('[data-export-btn]');
+    if (!exportBtn) {
+      exportBtn = _buildExportButton(status);
+      actionsContainer.appendChild(exportBtn);
+    }
+
+    // Mostrar u ocultar el contenedor según disponibilidad de entradas
+    const hasEntries = count > 0;
+    actionsContainer.hidden = !hasEntries;
+
+    if (hasEntries) {
+      exportBtn.setAttribute(
+        'aria-label',
+        `Exportar ${count} novela${count !== 1 ? 's' : ''} ` +
+        `de "${VN_STATUS_META[status].label}" como imagen PNG`,
+      );
+    }
+  });
+}
+
+/**
+ * Construye el elemento <button> de exportación para una sección de estado.
+ * Registra el listener UNA SOLA VEZ (no closures en el handler para
+ * facilitar garbage collection).
+ *
+ * @param {string} status - Estado de la sección (VN_STATUS).
+ * @returns {HTMLButtonElement}
+ */
+function _buildExportButton(status) {
+  const meta = VN_STATUS_META[status];
+
+  const btn = document.createElement('button');
+  btn.type      = 'button';
+  btn.className = 'vh-btn-export';
+  btn.setAttribute(
+    'title',
+    `Exportar la sección "${meta.label}" como imagen PNG compartible`,
+  );
+  btn.dataset.exportBtn    = status;
+  btn.dataset.exportStatus = status;
+
+  // Icono de cámara
+  const iconSpan = document.createElement('span');
+  iconSpan.className = 'vh-btn-export__icon';
+  iconSpan.setAttribute('aria-hidden', 'true');
+  iconSpan.textContent = '📸';
+
+  // Etiqueta
+  const labelSpan = document.createElement('span');
+  labelSpan.textContent = 'Exportar lista';
+
+  btn.appendChild(iconSpan);
+  btn.appendChild(labelSpan);
+
+  // Handler referenciado (no función anónima) para facilitar gestión de memoria
+  btn.addEventListener('click', _onExportButtonClick);
+
+  return btn;
+}
+
+/**
+ * Handler centralizado para todos los botones de exportación.
+ * Lee el estado desde el data-attribute del botón y delega en _openExportModal().
+ *
+ * SEGURIDAD: Valida el status antes de procesar para evitar valores
+ * arbitrarios inyectados en data-attributes.
+ *
+ * @param {MouseEvent} e
+ */
+function _onExportButtonClick(e) {
+  const btn    = e.currentTarget;
+  const status = btn.dataset.exportStatus;
+
+  if (!status || !Object.values(VN_STATUS).includes(status)) {
+    console.warn('[UI] Botón de exportar con status inválido:', status);
+    return;
+  }
+
+  _openExportModal(status);
+}
+
+/**
+ * Recopila los datos necesarios para la exportación y abre el modal.
+ *
+ * DATOS RECOPILADOS:
+ *  - entries: lista de LibraryEntries del estado solicitado.
+ *  - vnCache: caché de metadatos VNDB (portadas, títulos, ratings).
+ *  - theme:   tema activo del documento ('light' | 'dark').
+ *
+ * MANEJO DE ERRORES:
+ *  - Sección vacía → toast informativo (no abre el modal).
+ *  - Error inesperado de ModalExport → toast de error.
+ *
+ * @param {string} status - Estado de la sección (VN_STATUS).
+ */
+function _openExportModal(status) {
+  const entries = LibraryStore.getEntriesByStatus(status);
+
+  if (entries.length === 0) {
+    _showToast(
+      `No hay novelas en "${VN_STATUS_META[status].label}" para exportar.`,
+      'info',
+    );
+    return;
+  }
+
+  const theme = document.documentElement.dataset.theme ?? 'light';
+
+  try {
+    ModalExport.open({
+      status,
+      entries,
+      vnCache: _state.vnCache,
+      theme,
+    });
+  } catch (error) {
+    console.error('[UI] Error al abrir modal de exportación:', error);
+    _showToast('Error al preparar la exportación. Intenta nuevamente.', 'error');
+  }
 }
 
 
@@ -837,12 +1025,13 @@ function _closeStatusModal() {
   if (modal)   modal.hidden   = true;
   _state.menuTargetVnId = null;
 }
+
 function _ensureStatusMenu() {
   if (_dom.statusMenu && _dom.menuOverlay) return;
-  const existingMenu = document.getElementById('statusMenu');
+  const existingMenu    = document.getElementById('statusMenu');
   const existingOverlay = document.getElementById('menuOverlay');
   if (existingMenu && existingOverlay) {
-    _dom.statusMenu = existingMenu;
+    _dom.statusMenu  = existingMenu;
     _dom.menuOverlay = existingOverlay;
     if (!existingMenu.dataset.bound) {
       existingMenu.addEventListener('click', (e) => {
@@ -859,12 +1048,12 @@ function _ensureStatusMenu() {
   }
   const menu = document.createElement('div');
   menu.className = 'vh-status-menu';
-  menu.id = 'statusMenu';
-  menu.setAttribute('role', 'menu');
+  menu.id        = 'statusMenu';
+  menu.setAttribute('role',       'menu');
   menu.setAttribute('aria-label', 'Seleccionar estado para la biblioteca');
   menu.hidden = true;
   const title = document.createElement('p');
-  title.className = 'vh-status-menu__title';
+  title.className   = 'vh-status-menu__title';
   title.textContent = 'Añadir a biblioteca como:';
   const list = document.createElement('ul');
   list.className = 'vh-status-menu__list';
@@ -896,12 +1085,12 @@ function _ensureStatusMenu() {
   menu.appendChild(list);
   const overlay = document.createElement('div');
   overlay.className = 'vh-overlay';
-  overlay.id = 'menuOverlay';
-  overlay.hidden = true;
+  overlay.id        = 'menuOverlay';
+  overlay.hidden    = true;
   overlay.setAttribute('aria-hidden','true');
   document.body.appendChild(menu);
   document.body.appendChild(overlay);
-  _dom.statusMenu = menu;
+  _dom.statusMenu  = menu;
   _dom.menuOverlay = overlay;
   menu.addEventListener('click', (e) => {
     const btn = e.target.closest('[role="menuitem"][data-status]');
@@ -912,6 +1101,7 @@ function _ensureStatusMenu() {
   });
   overlay.addEventListener('click', _closeStatusMenu);
 }
+
 
 // ─────────────────────────────────────────────
 // 10. INICIALIZACIÓN
@@ -924,7 +1114,7 @@ function init() {
     const params = new URLSearchParams(window.location.search);
     const seed   = params.get('search')?.trim();
     if (seed && _dom.searchInput) {
-      _dom.searchInput.value = seed;
+      _dom.searchInput.value  = seed;
       _dom.searchClear.hidden = false;
       _setSearchState('loading');
       _executeSearch(seed, 1);

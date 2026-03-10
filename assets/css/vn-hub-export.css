@@ -1,0 +1,447 @@
+/* ────────────────────────────────────────────────────────────────
+   VN-HUB — Módulo de Exportación de Listas
+   Archivo: assets/css/vn-hub-export.css
+
+   DESCRIPCIÓN:
+    Estilos para el botón "Exportar como imagen" y su modal de
+    progreso/confirmación. Sigue el mismo sistema de design tokens
+    (variables CSS) definido en vn-hub.css para garantizar
+    consistencia visual en ambos temas (light / dark).
+
+   ÍNDICE:
+    1. Botón de exportación (por tab/sección)
+    2. Modal de exportación (overlay + panel)
+    3. Contenido interno del modal
+    4. Barra de progreso animada
+    5. Acciones del modal
+    6. Variantes por estado (colores de acento)
+    7. Animaciones
+    8. Responsive
+──────────────────────────────────────────────────────────────── */
+
+
+/* ────────────────────────────────────────────────────────────────
+   1. BOTÓN DE EXPORTACIÓN
+   Se coloca en el header interno de cada sección/tab.
+   Diseño: botón outline pequeño con icono de cámara/compartir.
+──────────────────────────────────────────────────────────────── */
+
+/**
+ * Contenedor de acciones de la sección (contiene el botón exportar).
+ * Se posiciona a la derecha del título de la sección.
+ */
+.vh-section-actions {
+  display:      flex;
+  align-items:  center;
+  gap:          10px;
+  flex-shrink:  0;
+}
+
+/**
+ * Botón de exportación principal.
+ * Estado base: outline con el color de acento.
+ * Hover: relleno sólido.
+ */
+.vh-btn-export {
+  display:        inline-flex;
+  align-items:    center;
+  gap:            7px;
+  padding:        9px 18px;
+  border-radius:  var(--vh-radius-full);
+  border:         1.5px solid var(--vh-accent);
+  background:     transparent;
+  color:          var(--vh-accent);
+  font-family:    "DM Sans", "Helvetica Neue", sans-serif;
+  font-size:      13px;
+  font-weight:    600;
+  letter-spacing: 0.02em;
+  cursor:         pointer;
+  transition:     background var(--vh-transition),
+                  color      var(--vh-transition),
+                  box-shadow var(--vh-transition),
+                  transform  var(--vh-transition);
+  white-space:    nowrap;
+  user-select:    none;
+}
+
+.vh-btn-export__icon {
+  font-size: 15px;
+  line-height: 1;
+  transition: transform var(--vh-transition);
+}
+
+.vh-btn-export:hover {
+  background:  var(--vh-accent);
+  color:       var(--vh-text-on-accent);
+  box-shadow:  var(--vh-shadow-accent);
+  transform:   translateY(-1px);
+}
+
+.vh-btn-export:hover .vh-btn-export__icon {
+  transform: scale(1.15) rotate(-5deg);
+}
+
+.vh-btn-export:active {
+  transform: translateY(0px) scale(0.97);
+}
+
+.vh-btn-export:focus-visible {
+  outline:        3px solid var(--vh-accent);
+  outline-offset: 3px;
+}
+
+/* Estado deshabilitado (durante la exportación) */
+.vh-btn-export:disabled,
+.vh-btn-export[aria-busy="true"] {
+  opacity:        0.55;
+  cursor:         not-allowed;
+  pointer-events: none;
+}
+
+
+/* ────────────────────────────────────────────────────────────────
+   2. MODAL DE EXPORTACIÓN — OVERLAY
+──────────────────────────────────────────────────────────────── */
+
+/**
+ * Overlay oscuro que cubre toda la pantalla.
+ * Se anima desde opacity 0 a 1.
+ */
+.vh-export-overlay {
+  position:   fixed;
+  inset:      0;
+  z-index:    1500; /* Por encima de otros modales existentes (z~1000) */
+  background: rgba(10, 6, 8, 0.72);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display:    flex;
+  align-items: center;
+  justify-content: center;
+  padding:    24px;
+
+  /* Estado inicial (invisible) */
+  opacity:    0;
+  visibility: hidden;
+  transition: opacity       var(--vh-transition-slow),
+              visibility    var(--vh-transition-slow);
+}
+
+/* Activo */
+.vh-export-overlay.is-visible {
+  opacity:    1;
+  visibility: visible;
+}
+
+
+/* ────────────────────────────────────────────────────────────────
+   3. PANEL DEL MODAL
+──────────────────────────────────────────────────────────────── */
+
+.vh-export-panel {
+  position:      relative;
+  width:         100%;
+  max-width:     480px;
+  background:    var(--vh-bg-surface);
+  border:        1px solid var(--vh-border);
+  border-radius: var(--vh-radius-xl);
+  box-shadow:    var(--vh-shadow-lg);
+  padding:       36px 32px 28px;
+  backdrop-filter: var(--vh-glass-blur);
+  -webkit-backdrop-filter: var(--vh-glass-blur);
+
+  /* Animación de entrada */
+  transform:  translateY(20px) scale(0.97);
+  transition: transform var(--vh-transition-slow);
+}
+
+.vh-export-overlay.is-visible .vh-export-panel {
+  transform: translateY(0) scale(1);
+}
+
+/* Acento de color en el borde superior del panel */
+.vh-export-panel::before {
+  content:       '';
+  position:      absolute;
+  top:           0;
+  left:          32px;
+  right:         32px;
+  height:        3px;
+  background:    linear-gradient(90deg, var(--vh-accent), var(--vh-accent-2));
+  border-radius: 0 0 var(--vh-radius-sm) var(--vh-radius-sm);
+}
+
+
+/* ────────────────────────────────────────────────────────────────
+   4. CONTENIDO DEL MODAL
+──────────────────────────────────────────────────────────────── */
+
+/* Icono grande en la parte superior */
+.vh-export-modal__icon {
+  font-size:     48px;
+  text-align:    center;
+  display:       block;
+  margin-bottom: 12px;
+  line-height:   1;
+}
+
+/* Título del modal */
+.vh-export-modal__title {
+  font-family:   "Playfair Display", Georgia, serif;
+  font-size:     22px;
+  font-weight:   700;
+  color:         var(--vh-text-primary);
+  text-align:    center;
+  margin:        0 0 6px;
+}
+
+/* Subtítulo / descripción */
+.vh-export-modal__subtitle {
+  font-size:     14px;
+  color:         var(--vh-text-secondary);
+  text-align:    center;
+  margin:        0 0 20px;
+  line-height:   1.5;
+}
+
+/* Badge del estado de la sección */
+.vh-export-modal__badge {
+  display:       inline-flex;
+  align-items:   center;
+  gap:           6px;
+  padding:       4px 14px;
+  border-radius: var(--vh-radius-full);
+  font-size:     13px;
+  font-weight:   600;
+  margin:        0 auto 20px;
+  /* Color dinámico via clase modificadora (ver sección 6) */
+}
+
+/* Contenedor centrado del badge */
+.vh-export-modal__badge-wrap {
+  display:        flex;
+  justify-content: center;
+}
+
+/* Info de cantidad de VNs */
+.vh-export-modal__count {
+  background:    var(--vh-accent-soft);
+  border:        1px solid var(--vh-border);
+  border-radius: var(--vh-radius-md);
+  padding:       10px 16px;
+  font-size:     13px;
+  color:         var(--vh-text-secondary);
+  text-align:    center;
+  margin-bottom: 20px;
+}
+
+.vh-export-modal__count strong {
+  color:       var(--vh-accent);
+  font-weight: 700;
+}
+
+
+/* ────────────────────────────────────────────────────────────────
+   5. BARRA DE PROGRESO
+──────────────────────────────────────────────────────────────── */
+
+.vh-export-progress {
+  margin-bottom: 20px;
+}
+
+/* Texto de estado (mensaje de progreso) */
+.vh-export-progress__msg {
+  font-size:     13px;
+  color:         var(--vh-text-secondary);
+  margin-bottom: 8px;
+  min-height:    18px;
+  transition:    opacity var(--vh-transition);
+}
+
+/* Track de la barra */
+.vh-export-progress__track {
+  height:        6px;
+  background:    var(--vh-bg-elevated);
+  border-radius: var(--vh-radius-full);
+  overflow:      hidden;
+  border:        1px solid var(--vh-border);
+}
+
+/* Relleno animado de la barra */
+.vh-export-progress__fill {
+  height:     100%;
+  width:      0%;
+  background: linear-gradient(90deg, var(--vh-accent), var(--vh-accent-2));
+  border-radius: var(--vh-radius-full);
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Animación de pulso mientras está en progreso */
+.vh-export-progress__fill--indeterminate {
+  width:           60%;
+  animation:       vhExportPulse 1.4s ease-in-out infinite;
+  transform-origin: left;
+}
+
+/* Estado completado */
+.vh-export-progress__fill--done {
+  width:      100%;
+  background: linear-gradient(90deg, #16a34a, #4ade80);
+}
+
+
+/* ────────────────────────────────────────────────────────────────
+   6. ACCIONES DEL MODAL
+──────────────────────────────────────────────────────────────── */
+
+.vh-export-modal__actions {
+  display:   flex;
+  gap:       12px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+/* Botón de confirmar exportación */
+.vh-export-modal__confirm {
+  flex:           1;
+  padding:        12px 20px;
+  border-radius:  var(--vh-radius-full);
+  border:         none;
+  background:     linear-gradient(135deg, var(--vh-accent), var(--vh-accent-hover));
+  color:          var(--vh-text-on-accent);
+  font-family:    "DM Sans", "Helvetica Neue", sans-serif;
+  font-size:      14px;
+  font-weight:    700;
+  cursor:         pointer;
+  transition:     box-shadow var(--vh-transition),
+                  transform  var(--vh-transition),
+                  opacity    var(--vh-transition);
+  display:        inline-flex;
+  align-items:    center;
+  justify-content: center;
+  gap:            8px;
+}
+
+.vh-export-modal__confirm:hover {
+  box-shadow: var(--vh-shadow-accent-hover);
+  transform:  translateY(-2px);
+}
+
+.vh-export-modal__confirm:active {
+  transform: translateY(0) scale(0.97);
+}
+
+.vh-export-modal__confirm:disabled {
+  opacity: 0.55;
+  cursor:  not-allowed;
+  pointer-events: none;
+}
+
+/* Botón de cancelar */
+.vh-export-modal__cancel {
+  padding:        12px 20px;
+  border-radius:  var(--vh-radius-full);
+  border:         1.5px solid var(--vh-border);
+  background:     transparent;
+  color:          var(--vh-text-secondary);
+  font-family:    "DM Sans", "Helvetica Neue", sans-serif;
+  font-size:      14px;
+  font-weight:    600;
+  cursor:         pointer;
+  transition:     background   var(--vh-transition),
+                  color        var(--vh-transition),
+                  border-color var(--vh-transition);
+}
+
+.vh-export-modal__cancel:hover {
+  background:   var(--vh-bg-elevated);
+  color:        var(--vh-text-primary);
+  border-color: var(--vh-border-hover);
+}
+
+
+/* ────────────────────────────────────────────────────────────────
+   7. VARIANTES DE BADGE POR ESTADO
+   Mapean los colores semánticos del sistema de badges existente.
+──────────────────────────────────────────────────────────────── */
+
+.vh-export-modal__badge--pending {
+  background: var(--vh-badge-pending-bg);
+  color:      var(--vh-badge-pending-fg);
+  border:     1px solid var(--vh-badge-pending-bd);
+}
+
+.vh-export-modal__badge--playing {
+  background: var(--vh-badge-playing-bg);
+  color:      var(--vh-badge-playing-fg);
+  border:     1px solid var(--vh-badge-playing-bd);
+}
+
+.vh-export-modal__badge--finished {
+  background: var(--vh-badge-finished-bg);
+  color:      var(--vh-badge-finished-fg);
+  border:     1px solid var(--vh-badge-finished-bd);
+}
+
+.vh-export-modal__badge--dropped {
+  background: var(--vh-badge-dropped-bg);
+  color:      var(--vh-badge-dropped-fg);
+  border:     1px solid var(--vh-badge-dropped-bd);
+}
+
+
+/* ────────────────────────────────────────────────────────────────
+   8. ANIMACIONES
+──────────────────────────────────────────────────────────────── */
+
+@keyframes vhExportPulse {
+  0%   { transform: scaleX(0.6); opacity: 0.8; }
+  50%  { transform: scaleX(1.0); opacity: 1;   }
+  100% { transform: scaleX(0.6); opacity: 0.8; }
+}
+
+@keyframes vhExportCheckPop {
+  0%   { transform: scale(0.5); opacity: 0; }
+  70%  { transform: scale(1.2); opacity: 1; }
+  100% { transform: scale(1.0); opacity: 1; }
+}
+
+/* Icono de check al completar */
+.vh-export-modal__icon--done {
+  animation: vhExportCheckPop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+
+/* ────────────────────────────────────────────────────────────────
+   9. RESPONSIVE
+──────────────────────────────────────────────────────────────── */
+
+@media (max-width: 600px) {
+  .vh-export-panel {
+    padding: 28px 20px 20px;
+  }
+
+  .vh-export-modal__actions {
+    flex-direction: column;
+  }
+
+  .vh-export-modal__cancel {
+    width: 100%;
+    text-align: center;
+  }
+
+  /* En móvil, el botón de exportar puede quedar en una segunda línea */
+  .vh-btn-export {
+    padding: 8px 14px;
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 420px) {
+  .vh-export-modal__title {
+    font-size: 19px;
+  }
+
+  .vh-export-modal__icon {
+    font-size: 38px;
+  }
+}

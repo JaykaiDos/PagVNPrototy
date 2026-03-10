@@ -11,6 +11,9 @@
 
   <link rel="stylesheet" href="assets/css/vn-hub.css" />
   <link rel="stylesheet" href="assets/css/vn-hub-components.css" />
+
+  <!-- ► v4: Estilos del módulo de exportación PNG por sección -->
+  <link rel="stylesheet" href="assets/css/vn-hub-export.css" />
 </head>
 
 <body>
@@ -195,6 +198,11 @@
 
       </div>
 
+      <!--
+        TABPANEL: TODOS
+        El botón de exportación NO aparece aquí (solo en secciones de estado específico).
+        _injectExportButtons() opera solo sobre los 4 paneles de estado.
+      -->
       <div class="vh-tabpanel" id="tabpanel-all" role="tabpanel" aria-labelledby="tab-all" aria-live="polite">
         <div class="vh-cards-grid" data-panel-grid="all" role="list"></div>
         <div class="vh-empty-state" data-empty="all" hidden>
@@ -203,6 +211,11 @@
         </div>
       </div>
 
+      <!--
+        TABPANEL: PENDIENTE
+        ► v4: _injectExportButtons() inyecta aquí .vh-section-actions con el botón 📸
+              si hay al menos 1 VN en esta sección.
+      -->
       <div class="vh-tabpanel vh-tabpanel--hidden" id="tabpanel-pending" role="tabpanel"
         aria-labelledby="tab-pending" aria-live="polite" hidden>
         <div class="vh-cards-grid" data-panel-grid="pending" role="list"></div>
@@ -211,6 +224,11 @@
         </div>
       </div>
 
+      <!--
+        TABPANEL: JUGANDO
+        ► v4: _injectExportButtons() inyecta aquí .vh-section-actions con el botón 📸
+              si hay al menos 1 VN en esta sección.
+      -->
       <div class="vh-tabpanel vh-tabpanel--hidden" id="tabpanel-playing" role="tabpanel"
         aria-labelledby="tab-playing" aria-live="polite" hidden>
         <div class="vh-cards-grid" data-panel-grid="playing" role="list"></div>
@@ -219,6 +237,11 @@
         </div>
       </div>
 
+      <!--
+        TABPANEL: FINALIZADO
+        ► v4: _injectExportButtons() inyecta aquí .vh-section-actions con el botón 📸
+              si hay al menos 1 VN en esta sección.
+      -->
       <div class="vh-tabpanel vh-tabpanel--hidden" id="tabpanel-finished" role="tabpanel"
         aria-labelledby="tab-finished" aria-live="polite" hidden>
         <div class="vh-cards-grid" data-panel-grid="finished" role="list"></div>
@@ -227,6 +250,11 @@
         </div>
       </div>
 
+      <!--
+        TABPANEL: ABANDONADA
+        ► v4: _injectExportButtons() inyecta aquí .vh-section-actions con el botón 📸
+              si hay al menos 1 VN en esta sección.
+      -->
       <div class="vh-tabpanel vh-tabpanel--hidden" id="tabpanel-dropped" role="tabpanel"
         aria-labelledby="tab-dropped" aria-live="polite" hidden>
         <div class="vh-cards-grid" data-panel-grid="dropped" role="list"></div>
@@ -308,11 +336,16 @@
 
   <!--
     SCRIPTS
-    Orden importante:
-    1. app-init.js     — bootstrap (LibraryStore + ThemeManager)
-    2. auth-controller — Auth Firebase (depende del store ya inicializado)
-    3. render-engine   — funciones puras de DOM
-    4. ui-controller   — eventos y coordinación
+    Orden de carga (ES Modules — el navegador gestiona dependencias):
+    1. app-init.js       — bootstrap (LibraryStore + ThemeManager)
+    2. auth-controller   — Auth Firebase (depende del store ya inicializado)
+    3. render-engine     — funciones puras de DOM
+    4. ui-controller     — eventos y coordinación (v4: incluye exportación)
+    5. feed-controller   — feed de comunidad
+
+    NOTA v4:
+    export-engine.js y modal-export.js son importados internamente por
+    ui-controller.js vía ES Module imports — NO requieren <script> adicionales.
   -->
   <script type="module" src="js/app-init.js"></script>
   <script type="module" src="js/auth-controller.js"></script>
