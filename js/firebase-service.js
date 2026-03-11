@@ -30,7 +30,7 @@ import {
   signInWithEmailAndPassword, sendPasswordResetEmail,
 } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 import {
-  getFirestore, doc, getDoc, setDoc, deleteDoc,
+  getFirestore, doc, getDoc, setDoc, updateDoc, deleteDoc,
   collection, getDocs, query, orderBy, limit,
   serverTimestamp, writeBatch,
 } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
@@ -402,21 +402,41 @@ async function publishToFeed({ vnId, vnTitle, vnImageUrl, finalScore, scoreLabel
   // no el de Firebase Auth que refleja el nombre del proveedor de login.
   const displayName = profile.displayName ?? _currentUser.displayName ?? 'Usuario';
   const photoURL    = profile.photoURL    ?? _currentUser.photoURL    ?? '';
+  const safeUrl     = /^https:\/\//i.test(vnImageUrl) ? vnImageUrl : '';
 
   const docId = `${_currentUser.uid}_${vnId}`;
-  await setDoc(doc(_db, 'feed', docId), {
-    uid:         _currentUser.uid,
-    displayName,
-    photoURL,
-    vnId,
-    vnTitle:     String(vnTitle    ?? '').slice(0, 200),
-    vnImageUrl:  /^https:\/\//i.test(vnImageUrl) ? vnImageUrl : '',
-    finalScore:  Number(finalScore) || 0,
-    scoreLabel:  String(scoreLabel  ?? ''),
-    review:      String(review      ?? '').slice(0, 2000),
-    isSpoiler:   Boolean(isSpoiler),
-    publishedAt: serverTimestamp(),
-  });
+  const ref   = doc(_db, 'feed', docId);
+  const snap  = await getDoc(ref);
+
+  if (!snap.exists()) {
+    // Primera publicación → create con todos los campos
+    await setDoc(ref, {
+      uid:         _currentUser.uid,
+      displayName,
+      photoURL,
+      vnId,
+      vnTitle:     String(vnTitle ?? '').slice(0, 200),
+      vnImageUrl:  safeUrl,
+      finalScore:  Number(finalScore) || 0,
+      scoreLabel:  String(scoreLabel  ?? ''),
+      review:      String(review      ?? '').slice(0, 2000),
+      isSpoiler:   Boolean(isSpoiler),
+      publishedAt: serverTimestamp(),
+    });
+  } else {
+    // Edición → updateDoc con EXACTAMENTE los campos permitidos por las Security Rules:
+    // ['finalScore', 'scoreLabel', 'review', 'isSpoiler', 'vnImageUrl', 'updatedAt']
+    // updateDoc (no setDoc) garantiza semántica de update en Firestore.
+    await updateDoc(ref, {
+      finalScore: Number(finalScore) || 0,
+      scoreLabel: String(scoreLabel  ?? ''),
+      review:     String(review      ?? '').slice(0, 2000),
+      isSpoiler:  Boolean(isSpoiler),
+      vnImageUrl: safeUrl,
+      updatedAt:  serverTimestamp(),
+    });
+  }
+
   return docId;
 }
 

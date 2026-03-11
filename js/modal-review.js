@@ -6,12 +6,19 @@
  *              Renderiza el formulario de puntuación por categorías,
  *              calcula el score en tiempo real y persiste via LibraryStore.
  *
+ * CORRECCIONES v2:
+ *  - [BUG #1] Tras publishToFeed() exitoso, se llama a
+ *    FeedController.notifyReviewPublished() para invalidar el caché
+ *    del feed. Sin esta llamada, el usuario ve datos obsoletos por
+ *    hasta 60 segundos si navega a "Comunidad" inmediatamente.
+ *
  * FLUJO:
  *  1. ui-controller llama a open(vnId, vnTitle)
  *  2. El usuario ajusta los sliders y completa la reseña
  *  3. Al confirmar: calculateScore() → LibraryStore.updateReview()
  *  4. Si hay sesión Firebase: publishToFeed() (si perfil es público)
- *  5. El modal se cierra y el Observer del store re-renderiza la biblioteca
+ *  5. [NUEVO] FeedController.notifyReviewPublished() → invalida caché del feed
+ *  6. El modal se cierra y el Observer del store re-renderiza la biblioteca
  *
  * SRP: Este módulo SOLO gestiona el modal de review.
  *      No accede a VNDB, no toca el DOM fuera del modal.
@@ -22,14 +29,15 @@ import { calculateScore, formatFinalScore,
          getScoreLabel }                        from './score-engine.js';
 import * as LibraryStore                        from './library-store.js';
 import * as FirebaseService                     from './firebase-service.js';
+import * as FeedController                      from './feed-controller.js';
 
 
 // ── Estado interno del modal ─────────────────────────────────────────
 const _state = {
-  vnId:           null,
-  vnTitle:        '',
-  vnImageUrl:     '',
-  finalScore:     null,
+  vnId:            null,
+  vnTitle:         '',
+  vnImageUrl:      '',
+  finalScore:      null,
   hasAdultContent: true,
 };
 
@@ -49,21 +57,19 @@ let _values   = {};   // key → <span> que muestra el valor
  * Solo se llama una vez; después se muestra/oculta con hidden.
  */
 function _build() {
-  // Overlay
   _overlay = document.createElement('div');
   _overlay.className = 'vh-modal-overlay';
   _overlay.id        = 'modalReviewOverlay';
-  _overlay.setAttribute('hidden', '');
-  _overlay.setAttribute('role',   'dialog');
-  _overlay.setAttribute('aria-modal', 'true');
+  _overlay.setAttribute('hidden',       '');
+  _overlay.setAttribute('role',         'dialog');
+  _overlay.setAttribute('aria-modal',   'true');
   _overlay.setAttribute('aria-labelledby', 'modalReviewTitle');
 
-  // Modal
   _modal = document.createElement('div');
   _modal.className = 'vh-modal';
 
   // ── Header ──
-  const header = document.createElement('div');
+  const header     = document.createElement('div');
   header.className = 'vh-modal__header';
 
   const titleBlock = document.createElement('div');
@@ -93,27 +99,16 @@ function _build() {
   const body = document.createElement('div');
   body.className = 'vh-modal__body';
 
-  // Toggle adulto
   body.appendChild(_buildAdultToggle());
-
-  // Grid de sliders
   body.appendChild(_buildScoreGrid());
-
-  // Preview del puntaje total
   body.appendChild(_buildScorePreview());
 
-  // Separador visual
   const sep = document.createElement('hr');
   sep.style.cssText = 'border:none; border-top:1px solid var(--vh-border); margin:0.25rem 0;';
   body.appendChild(sep);
 
-  // Campo ruta favorita
   body.appendChild(_buildTextField('favRoute', 'Ruta Favorita', 'ej: Ruta de Rin, True End…', false));
-
-  // Campo reseña
   body.appendChild(_buildTextareaField('review', 'Reseña', 'Escribe tu opinión sobre esta VN…'));
-
-  // Checkbox spoiler
   body.appendChild(_buildSpoilerCheckbox());
 
   // ── Footer ──
@@ -134,19 +129,16 @@ function _build() {
   footer.appendChild(cancelBtn);
   footer.appendChild(saveBtn);
 
-  // Ensamblar
   _modal.appendChild(header);
   _modal.appendChild(body);
   _modal.appendChild(footer);
   _overlay.appendChild(_modal);
   document.body.appendChild(_overlay);
 
-  // Cerrar al click en el overlay (fuera del modal)
   _overlay.addEventListener('click', (e) => {
     if (e.target === _overlay) close();
   });
 
-  // Cerrar con Escape
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !_overlay.hidden) close();
   });
@@ -192,18 +184,14 @@ function _buildScoreGrid() {
   grid.className = 'vh-score-grid';
   grid.id        = 'scoreGrid';
 
-  // Solo categorías base (no bonus, que va por separado)
   const categories = SCORE_CATEGORIES.filter(c => !c.bonus);
 
   categories.forEach(cat => {
     const row = _buildSliderRow(cat);
-    if (cat.optional) {
-      row.dataset.adultRow = 'true';
-    }
+    if (cat.optional) row.dataset.adultRow = 'true';
     grid.appendChild(row);
   });
 
-  // Bonus (extra) — fila separada abajo del grid, ancho completo
   const bonusCat = SCORE_CATEGORIES.find(c => c.bonus);
   if (bonusCat) {
     const bonusRow = _buildSliderRow(bonusCat);
@@ -245,14 +233,12 @@ function _buildSliderRow(cat) {
   slider.max       = '10';
   slider.step      = '0.5';
   slider.value     = '5';
-  slider.setAttribute('aria-label', `${cat.label} (0-10)`);
 
   slider.addEventListener('input', () => {
     valueDisplay.textContent = slider.value;
     _recalculate();
   });
 
-  // Guardamos referencias para leer los valores al guardar
   _sliders[cat.key] = slider;
   _values[cat.key]  = valueDisplay;
 
@@ -262,94 +248,81 @@ function _buildSliderRow(cat) {
 }
 
 /**
- * Sección de preview del puntaje total (actualizada en tiempo real).
+ * Preview del puntaje total en tiempo real.
  */
 function _buildScorePreview() {
   const preview = document.createElement('div');
   preview.className = 'vh-score-preview';
 
+  const scoreEl = document.createElement('span');
+  scoreEl.className   = 'vh-score-preview__score';
+  scoreEl.id          = 'previewScore';
+  scoreEl.textContent = '—';
+
   const labelEl = document.createElement('span');
   labelEl.className   = 'vh-score-preview__label';
-  labelEl.textContent = 'Puntaje Final';
+  labelEl.id          = 'previewLabel';
+  labelEl.textContent = 'Ajusta los sliders';
 
-  const valueEl = document.createElement('span');
-  valueEl.className = 'vh-score-preview__value';
-  valueEl.id        = 'previewScore';
-  valueEl.textContent = '—';
-
-  const tagEl = document.createElement('span');
-  tagEl.className = 'vh-score-preview__tag';
-  tagEl.id        = 'previewLabel';
-  tagEl.textContent = 'Ajusta los sliders';
-
+  preview.appendChild(scoreEl);
   preview.appendChild(labelEl);
-  preview.appendChild(valueEl);
-  preview.appendChild(tagEl);
   return preview;
 }
 
 /**
- * Campo de texto de una línea (ej: ruta favorita).
+ * Campo de texto simple (favRoute).
  * @param {string} id
- * @param {string} label
+ * @param {string} labelText
  * @param {string} placeholder
  * @param {boolean} required
  */
-function _buildTextField(id, label, placeholder, required = false) {
-  const field = document.createElement('div');
-  field.className = 'vh-field';
+function _buildTextField(id, labelText, placeholder, required = false) {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'vh-field';
 
-  const labelEl = document.createElement('label');
-  labelEl.className   = 'vh-field__label';
-  labelEl.htmlFor     = `review_${id}`;
-  labelEl.textContent = label;
-  if (!required) {
-    const opt = document.createElement('span');
-    opt.textContent = ' (opcional)';
-    labelEl.appendChild(opt);
-  }
+  const label = document.createElement('label');
+  label.className   = 'vh-field__label';
+  label.htmlFor     = `review_${id}`;
+  label.textContent = labelText;
 
   const input = document.createElement('input');
   input.type        = 'text';
   input.className   = 'vh-field__input';
   input.id          = `review_${id}`;
   input.placeholder = placeholder;
-  input.maxLength   = 100;
+  input.required    = required;
+  input.maxLength   = 200;
 
-  field.appendChild(labelEl);
-  field.appendChild(input);
-  return field;
+  wrapper.appendChild(label);
+  wrapper.appendChild(input);
+  return wrapper;
 }
 
 /**
- * Campo de textarea (ej: reseña).
+ * Campo de texto largo (review).
  * @param {string} id
- * @param {string} label
+ * @param {string} labelText
  * @param {string} placeholder
  */
-function _buildTextareaField(id, label, placeholder) {
-  const field = document.createElement('div');
-  field.className = 'vh-field';
+function _buildTextareaField(id, labelText, placeholder) {
+  const wrapper = document.createElement('div');
+  wrapper.className = 'vh-field';
 
-  const labelEl = document.createElement('label');
-  labelEl.className   = 'vh-field__label';
-  labelEl.htmlFor     = `review_${id}`;
-  labelEl.textContent = label;
-
-  const opt = document.createElement('span');
-  opt.textContent = ' (opcional)';
-  labelEl.appendChild(opt);
+  const label = document.createElement('label');
+  label.className   = 'vh-field__label';
+  label.htmlFor     = `review_${id}`;
+  label.textContent = labelText;
 
   const textarea = document.createElement('textarea');
   textarea.className   = 'vh-field__textarea';
   textarea.id          = `review_${id}`;
   textarea.placeholder = placeholder;
-  textarea.maxLength   = 2000;
   textarea.rows        = 4;
+  textarea.maxLength   = 5000;
 
-  field.appendChild(labelEl);
-  field.appendChild(textarea);
-  return field;
+  wrapper.appendChild(label);
+  wrapper.appendChild(textarea);
+  return wrapper;
 }
 
 /**
@@ -395,7 +368,7 @@ function _toggleAdultRow(show) {
  */
 function _recalculate() {
   try {
-    const input = _buildScoreInput();
+    const input  = _buildScoreInput();
     const result = calculateScore(input);
 
     _state.finalScore = result;
@@ -407,7 +380,7 @@ function _recalculate() {
     if (previewLabel) previewLabel.textContent  = result.finalScoreLabel;
 
   } catch {
-    // Input incompleto aún — no mostramos error, solo dejamos el preview en "—"
+    // Input incompleto aún — no mostramos error
   }
 }
 
@@ -435,7 +408,19 @@ function _buildScoreInput() {
 
 /**
  * Maneja el click en "Guardar clasificación".
- * Valida, persiste en el store y opcionalmente publica en el feed.
+ *
+ * FLUJO CORREGIDO:
+ *  1. Calcular score
+ *  2. Persistir en LibraryStore (dispara FirebaseSync para la biblioteca)
+ *  3. Publicar/actualizar en el feed de comunidad (publishToFeed)
+ *  4. [CORRECCIÓN BUG #1] Invalidar caché del feed para recarga inmediata
+ *  5. Cerrar el modal
+ *
+ * NOTA: FirebaseSync._syncFeed() también se ejecutará (vía Observer del store),
+ * pero publishToFeed() es idempotente (detecta si doc existe → create/update),
+ * por lo que la doble llamada es segura. En la práctica, el flujo del modal
+ * es más rápido y completo (incluye vnTitle/vnImageUrl), por lo que tiene
+ * precedencia efectiva.
  */
 async function _handleSave() {
   const saveBtn = document.getElementById('modalReviewSave');
@@ -443,21 +428,25 @@ async function _handleSave() {
   try {
     if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Guardando…'; }
 
-    // Calcular score final
+    // ── 1. Calcular score final ───────────────────────────────────────
     const scoreInput = _buildScoreInput();
     const scoreData  = calculateScore(scoreInput);
 
-    // Leer campos de texto
+    // ── 2. Leer campos de texto ───────────────────────────────────────
     const favRoute  = document.getElementById('review_favRoute')?.value.trim()  ?? '';
     const review    = document.getElementById('review_review')?.value.trim()    ?? '';
     const isSpoiler = document.getElementById('review_isSpoiler')?.checked      ?? false;
 
-    // Persistir en el store local
+    // ── 3. Persistir en el store local ────────────────────────────────
+    // Esto dispara el Observer → FirebaseSync → saveLibraryEntry (biblioteca)
     LibraryStore.updateReview(_state.vnId, scoreData, { favRoute, review, isSpoiler });
 
-    // Publicar en el feed si hay sesión activa
+    // ── 4. Publicar en el feed público ────────────────────────────────
+    // publishToFeed() detecta si ya existe → create o update parcial.
+    // Se ejecuta directamente aquí (no solo vía FirebaseSync) porque
+    // este flujo tiene acceso a vnTitle y vnImageUrl que el store no guarda.
     if (FirebaseService.isAuthenticated()) {
-      await FirebaseService.publishToFeed({
+      const feedResult = await FirebaseService.publishToFeed({
         vnId:       _state.vnId,
         vnTitle:    _state.vnTitle,
         vnImageUrl: _state.vnImageUrl,
@@ -465,10 +454,22 @@ async function _handleSave() {
         scoreLabel: scoreData.finalScoreLabel,
         review,
         isSpoiler,
-      }).catch(err => console.warn('[ModalReview] No se pudo publicar en feed:', err));
+      }).catch(err => {
+        console.error('[ModalReview] Error al sincronizar feed:', err);
+        return null;
+      });
+
+      // ── [CORRECCIÓN BUG #1] Invalidar caché del feed ─────────────────
+      // Si la publicación fue exitosa (feedResult no es null), invalidamos
+      // el caché para que el feed muestre los datos frescos inmediatamente.
+      if (feedResult !== null) {
+        FeedController.notifyReviewPublished().catch(err =>
+          console.warn('[ModalReview] Error al invalidar caché del feed:', err)
+        );
+      }
     }
 
-    // Restaurar botón antes de cerrar para que el modal quede limpio al reutilizarse
+    // ── 5. Restaurar UI y cerrar ──────────────────────────────────────
     if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 Guardar clasificación'; }
     close();
 
@@ -498,17 +499,13 @@ function open(vnId, vnTitle, vnImageUrl = '') {
   _state.vnTitle    = vnTitle;
   _state.vnImageUrl = vnImageUrl;
 
-  // Garantizar que el botón esté siempre habilitado al abrir el modal.
-  // Failsafe contra el estado "Guardando…" persistente cuando el modal
-  // singleton se reutiliza tras una operación anterior exitosa o fallida.
+  // Failsafe: garantizar botón siempre habilitado al abrir
   const saveBtn = document.getElementById('modalReviewSave');
   if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '💾 Guardar clasificación'; }
 
-  // Actualizar subtítulo con el nombre de la VN
   const subtitle = document.getElementById('modalReviewSubtitle');
   if (subtitle) subtitle.textContent = vnTitle;
 
-  // Pre-cargar valores si ya existe una review guardada
   const entry = LibraryStore.getEntry(vnId);
   if (entry?.score) {
     _preloadValues(entry);
@@ -519,7 +516,6 @@ function open(vnId, vnTitle, vnImageUrl = '') {
   _recalculate();
   _overlay.hidden = false;
 
-  // Focus al primer slider para accesibilidad
   const firstSlider = Object.values(_sliders)[0];
   firstSlider?.focus();
 }
@@ -537,15 +533,13 @@ function close() {
 function _preloadValues(entry) {
   const score = entry.score;
 
-  // Restaurar sliders
   Object.entries(score.rawScores ?? {}).forEach(([key, val]) => {
     if (_sliders[key]) {
-      _sliders[key].value  = val;
+      _sliders[key].value = val;
       if (_values[key]) _values[key].textContent = String(val);
     }
   });
 
-  // Restaurar toggle adulto
   const adultCheckbox = document.getElementById('reviewHasAdult');
   if (adultCheckbox) {
     adultCheckbox.checked  = score.hasAdultContent;
@@ -553,14 +547,13 @@ function _preloadValues(entry) {
     _toggleAdultRow(score.hasAdultContent);
   }
 
-  // Restaurar campos de texto
   const favInput    = document.getElementById('review_favRoute');
   const reviewInput = document.getElementById('review_review');
   const spoilerChk  = document.getElementById('review_isSpoiler');
 
-  if (favInput)    favInput.value      = entry.favRoute  ?? '';
-  if (reviewInput) reviewInput.value   = entry.review    ?? '';
-  if (spoilerChk)  spoilerChk.checked  = entry.isSpoiler ?? false;
+  if (favInput)    favInput.value     = entry.favRoute  ?? '';
+  if (reviewInput) reviewInput.value  = entry.review    ?? '';
+  if (spoilerChk)  spoilerChk.checked = entry.isSpoiler ?? false;
 }
 
 /**

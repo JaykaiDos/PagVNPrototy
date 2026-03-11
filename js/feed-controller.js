@@ -4,20 +4,23 @@
  * @file js/feed-controller.js
  * @description Controlador del feed de comunidad.
  *              Carga y renderiza las reseñas públicas desde Firestore.
- *              Se activa automáticamente cuando el usuario navega
- *              a la vista "feed".
+ *
+ * CORRECCIONES v2:
+ *  - [BUG #1] invalidateCache(): Permite que módulos externos (modal-review,
+ *    FirebaseSync) fuercen una recarga en la próxima visita al feed.
+ *    Reemplaza el anti-patrón de cooldown que bloqueaba actualizaciones
+ *    inmediatas tras guardar una reseña.
+ *  - [BUG #1] notifyReviewPublished(): API explícita post-publicación.
+ *    Si el feed está visible al momento de guardar, lo recarga ahora mismo.
+ *    Si no está visible, marca el cache como inválido para la próxima visita.
+ *  - [DISEÑO] El cooldown de 60s se mantiene para cargas pasivas (navegación
+ *    normal sin cambios recientes), pero se bypasea vía invalidateCache().
  *
  * RESPONSABILIDAD ÚNICA:
  *  - Escuchar el evento de navegación a la vista feed.
  *  - Cargar las entradas públicas con getPublicFeed().
  *  - Renderizar cada entrada como una .vh-feed-card en #feedList.
  *  - Gestionar estados de carga, vacío y error.
- *
- * NO hace: lógica de puntuación, auth, library store.
- *
- * INTEGRACIÓN:
- *  app-init.js → FeedController.init()
- *  ui-controller.js → navFeed click → FeedController carga el feed
  */
 
 import * as FirebaseService from './firebase-service.js';
@@ -31,7 +34,10 @@ import { escapeHtml }       from './utils.js';
 /** Cantidad de reseñas a cargar por defecto */
 const FEED_PAGE_SIZE = 20;
 
-/** Tiempo mínimo entre recargas del feed (ms) para no saturar Firestore */
+/**
+ * Tiempo mínimo entre recargas PASIVAS del feed (navegación normal).
+ * Este cooldown NO aplica cuando invalidateCache() fue llamado.
+ */
 const FEED_RELOAD_COOLDOWN_MS = 60_000;
 
 
@@ -40,9 +46,10 @@ const FEED_RELOAD_COOLDOWN_MS = 60_000;
 // ─────────────────────────────────────────────
 
 const _state = {
-  loaded:     false,
-  loading:    false,
-  lastLoaded: 0,   // timestamp de la última carga exitosa
+  loaded:        false,
+  loading:       false,
+  lastLoaded:    0,    // timestamp de la última carga exitosa
+  cacheInvalid:  false, // [CORRECCIÓN] Flag: cache invalidado por cambio del usuario
 };
 
 
@@ -52,37 +59,97 @@ const _state = {
 
 const _dom = {};
 
+/**
+ * Cachea las referencias DOM necesarias.
+ * Se llama una sola vez en init().
+ */
 function _cacheDOM() {
-  _dom.feedList  = document.getElementById('feedList');
-  _dom.viewFeed  = document.getElementById('viewFeed');
-  _dom.navFeed   = document.getElementById('navFeed');
+  _dom.feedList = document.getElementById('feedList');
+  _dom.viewFeed = document.getElementById('viewFeed');
+  _dom.navFeed  = document.getElementById('navFeed');
+}
+
+/**
+ * Comprueba si la vista del feed está actualmente visible en el DOM.
+ * @returns {boolean}
+ */
+function _isFeedVisible() {
+  return _dom.viewFeed != null && !_dom.viewFeed.hidden;
 }
 
 
 // ════════════════════════════════════════════════════════
-// 1. CARGA DE DATOS
+// 1. GESTIÓN DE CACHÉ (API PÚBLICA)
+// ════════════════════════════════════════════════════════
+
+/**
+ * [CORRECCIÓN BUG #1]
+ * Invalida el caché del feed, forzando una recarga en la próxima visita.
+ *
+ * Este método debe llamarse SIEMPRE que el usuario publique o modifique
+ * una reseña (desde modal-review.js o FirebaseSync en app-init.js).
+ *
+ * COMPORTAMIENTO:
+ *  - Si el feed está visible AHORA → recarga inmediatamente (force=true).
+ *  - Si el feed NO está visible    → marca el caché como inválido.
+ *    La próxima vez que el usuario navegue a "Comunidad", verá los datos frescos.
+ *
+ * @returns {Promise<void>}
+ */
+async function invalidateCache() {
+  _state.cacheInvalid = true;
+
+  if (_isFeedVisible()) {
+    // El usuario está mirando el feed justo ahora → recargar inmediatamente
+    await loadFeed(true);
+  }
+  // Si no está visible, el flag cacheInvalid lo recargará al navegar
+}
+
+/**
+ * [CORRECCIÓN BUG #1]
+ * Atajo semántico para llamar desde modal-review y FirebaseSync
+ * cuando una reseña acaba de ser publicada o actualizada.
+ *
+ * @returns {Promise<void>}
+ */
+async function notifyReviewPublished() {
+  return invalidateCache();
+}
+
+
+// ════════════════════════════════════════════════════════
+// 2. CARGA DE DATOS
 // ════════════════════════════════════════════════════════
 
 /**
  * Carga el feed público desde Firestore y re-renderiza.
- * Respeta el cooldown para evitar lecturas innecesarias.
  *
- * @param {boolean} [force=false] — Si true, ignora el cooldown
+ * LÓGICA DE COOLDOWN (revisada):
+ *  - Si force=true         → siempre carga (sin restricciones).
+ *  - Si cacheInvalid=true  → siempre carga (el usuario tiene cambios recientes).
+ *  - Si ya cargó hace <60s → no carga (evita lecturas innecesarias en Firestore).
+ *
+ * @param {boolean} [force=false] — Si true, ignora cooldown y cacheInvalid
  */
 async function loadFeed(force = false) {
   if (_state.loading) return;
 
-  const now      = Date.now();
-  const cooldown = now - _state.lastLoaded < FEED_RELOAD_COOLDOWN_MS;
-  if (!force && _state.loaded && cooldown) return;
+  const now          = Date.now();
+  const withinCooldown = now - _state.lastLoaded < FEED_RELOAD_COOLDOWN_MS;
 
-  _state.loading = true;
+  // [CORRECCIÓN] cacheInvalid bypasea el cooldown pasivo
+  const shouldSkip = !force && !_state.cacheInvalid && _state.loaded && withinCooldown;
+  if (shouldSkip) return;
+
+  _state.loading     = true;
+  _state.cacheInvalid = false; // Consumimos el flag de invalidación
   _renderLoading();
 
   try {
     const entries = await FirebaseService.getPublicFeed(FEED_PAGE_SIZE);
 
-    _state.loaded    = true;
+    _state.loaded     = true;
     _state.lastLoaded = Date.now();
 
     if (entries.length === 0) {
@@ -94,6 +161,7 @@ async function loadFeed(force = false) {
   } catch (err) {
     console.error('[FeedController] Error al cargar feed:', err);
     _renderError(err.message);
+    // En caso de error, dejamos cacheInvalid=false para no crear bucle de reintentos
   } finally {
     _state.loading = false;
   }
@@ -101,7 +169,7 @@ async function loadFeed(force = false) {
 
 
 // ════════════════════════════════════════════════════════
-// 2. RENDERIZADO
+// 3. RENDERIZADO
 // ════════════════════════════════════════════════════════
 
 /**
@@ -113,10 +181,9 @@ function _renderLoading() {
 
   const fragment = document.createDocumentFragment();
 
-  // 3 skeletons animados para indicar carga
   for (let i = 0; i < 3; i++) {
     const skeleton = document.createElement('div');
-    skeleton.className   = 'vh-feed-card vh-feed-card--skeleton';
+    skeleton.className = 'vh-feed-card vh-feed-card--skeleton';
     skeleton.setAttribute('aria-hidden', 'true');
     skeleton.style.animationDelay = `${i * 120}ms`;
 
@@ -216,7 +283,6 @@ function _renderEntries(entries) {
     try {
       fragment.appendChild(_buildFeedCard(entry, index));
     } catch (err) {
-      // Una entrada malformada no bloquea el resto
       console.warn('[FeedController] Entrada inválida ignorada:', entry.id, err);
     }
   });
@@ -226,43 +292,36 @@ function _renderEntries(entries) {
 
 /**
  * Construye una .vh-feed-card a partir de un documento del feed.
- * SEGURIDAD: todos los textos se escapan con escapeHtml() antes
- * de insertarse en el DOM para prevenir XSS.
+ * SEGURIDAD: todos los textos se escapan con escapeHtml() o textContent
+ * para prevenir XSS sin excepción.
  *
  * @param {object} entry — Documento Firestore
  * @param {number} index — Para animación escalonada
  * @returns {HTMLElement}
  */
 function _buildFeedCard(entry, index) {
-  // ── Validación básica del documento ──────────────────────────────
   if (!entry || typeof entry !== 'object') throw new TypeError('Entrada inválida');
 
   const card = document.createElement('article');
   card.className = 'vh-feed-card';
   card.style.animationDelay = `${index * 60}ms`;
 
-  // ── Portada ──────────────────────────────────────────────────────
   card.appendChild(_buildCover(entry));
 
-  // ── Cuerpo ───────────────────────────────────────────────────────
   const body = document.createElement('div');
   body.className = 'vh-feed-card__body';
 
-  // Meta: avatar + nombre + fecha
   body.appendChild(_buildMeta(entry));
 
-  // Título de la VN
   const vnTitle = document.createElement('p');
   vnTitle.className   = 'vh-feed-card__vn-title';
   vnTitle.textContent = escapeHtml(String(entry.vnTitle ?? 'Sin título'));
   body.appendChild(vnTitle);
 
-  // Línea de puntaje
   if (typeof entry.finalScore === 'number') {
     body.appendChild(_buildScoreLine(entry));
   }
 
-  // Reseña (con soporte spoiler)
   if (entry.review && String(entry.review).trim().length > 0) {
     body.appendChild(_buildReviewText(entry));
   }
@@ -306,7 +365,6 @@ function _buildMeta(entry) {
   const meta = document.createElement('div');
   meta.className = 'vh-feed-card__meta';
 
-  // Avatar
   const isValidPhoto = typeof entry.photoURL === 'string'
     && /^https:\/\//i.test(entry.photoURL);
 
@@ -319,16 +377,16 @@ function _buildMeta(entry) {
     meta.appendChild(avatar);
   }
 
-  // Nombre de usuario
   const userName = document.createElement('span');
   userName.className   = 'vh-feed-card__user';
   userName.textContent = escapeHtml(String(entry.displayName ?? 'Usuario'));
   meta.appendChild(userName);
 
-  // Fecha relativa
   const dateEl = document.createElement('span');
   dateEl.className   = 'vh-feed-card__date';
-  dateEl.textContent = _formatDate(entry.publishedAt);
+  // [DISEÑO] Preferimos updatedAt para reflejar ediciones recientes.
+  // Si no existe updatedAt (publicación original sin editar), usamos publishedAt.
+  dateEl.textContent = _formatDate(entry.updatedAt ?? entry.publishedAt);
   meta.appendChild(dateEl);
 
   return meta;
@@ -357,9 +415,8 @@ function _buildScoreLine(entry) {
 }
 
 /**
- * Construye el bloque de texto de reseña.
- * Si isSpoiler=true, aplica el filtro blur y el listener de click.
- * SEGURIDAD: usa textContent, nunca innerHTML con datos de usuario.
+ * Construye el bloque de texto de reseña con soporte de spoiler.
+ * SEGURIDAD: usa textContent, nunca innerHTML con datos del usuario.
  *
  * @param {object} entry
  * @returns {HTMLElement}
@@ -367,7 +424,6 @@ function _buildScoreLine(entry) {
 function _buildReviewText(entry) {
   const review = document.createElement('p');
   review.className   = 'vh-feed-card__review';
-  // textContent escapa automáticamente: seguro contra XSS
   review.textContent = String(entry.review ?? '');
 
   if (entry.isSpoiler) {
@@ -383,11 +439,11 @@ function _buildReviewText(entry) {
 
 
 // ════════════════════════════════════════════════════════
-// 3. HELPERS
+// 4. HELPERS
 // ════════════════════════════════════════════════════════
 
 /**
- * Limpia el contenedor del feed.
+ * Limpia el contenedor del feed de forma eficiente.
  */
 function _clear() {
   if (!_dom.feedList) return;
@@ -398,7 +454,7 @@ function _clear() {
 
 /**
  * Formatea una fecha Firestore (Timestamp o ISO string) como texto relativo.
- * Ej: "hace 3 días", "hace 1 hora", "hoy".
+ * Ej: "hace 3 días", "hace 1 hora", "ahora".
  *
  * @param {object|string|null} timestamp — Firestore Timestamp o string ISO
  * @returns {string}
@@ -407,13 +463,11 @@ function _formatDate(timestamp) {
   try {
     let date;
 
-    // Firestore Timestamp tiene .toDate()
     if (timestamp && typeof timestamp.toDate === 'function') {
       date = timestamp.toDate();
     } else if (typeof timestamp === 'string') {
       date = new Date(timestamp);
     } else if (timestamp?.seconds) {
-      // Firestore Timestamp serializado como { seconds, nanoseconds }
       date = new Date(timestamp.seconds * 1000);
     } else {
       return '';
@@ -442,27 +496,32 @@ function _formatDate(timestamp) {
 
 
 // ════════════════════════════════════════════════════════
-// 4. REGISTRO DE EVENTOS
+// 5. REGISTRO DE EVENTOS
 // ════════════════════════════════════════════════════════
 
 /**
  * Escucha el click en el botón de navegación "Comunidad".
  * Cuando se activa la vista feed, carga los datos si es necesario.
+ *
+ * [CORRECCIÓN BUG #1] Si cacheInvalid=true, siempre recarga al navegar.
  */
 function _bindEvents() {
   const navFeed = document.getElementById('navFeed');
   if (!navFeed) return;
 
   navFeed.addEventListener('click', () => {
-    // Esperamos un tick para que ui-controller haya
-    // cambiado la vista antes de cargar el feed.
-    requestAnimationFrame(() => loadFeed());
+    // Esperamos un tick para que ui-controller haya cambiado la vista
+    requestAnimationFrame(() => {
+      // Si hay cambios pendientes del usuario, forzar recarga
+      const shouldForce = _state.cacheInvalid;
+      loadFeed(shouldForce);
+    });
   });
 }
 
 
 // ════════════════════════════════════════════════════════
-// 5. INICIALIZACIÓN
+// 6. INICIALIZACIÓN
 // ════════════════════════════════════════════════════════
 
 /**
@@ -475,4 +534,4 @@ function init() {
   console.info('[FeedController] Inicializado ✓');
 }
 
-export { init, loadFeed };
+export { init, loadFeed, invalidateCache, notifyReviewPublished };

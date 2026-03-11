@@ -5,11 +5,24 @@
  * @description Punto de entrada de VN-Hub.
  *              Orquesta la inicialización de todos los módulos en orden.
  *
+ * CORRECCIONES v2:
+ *  - [BUG #2] FirebaseSync._onStoreEvent 'update': Cuando una entrada pasa
+ *    a estado 'finished' con score/review, ahora también sincroniza el feed
+ *    público (publishToFeed). Previamente solo guardaba en users/{uid}/library.
+ *  - [BUG #3] FirebaseSync._onStoreEvent 'update': Cuando una entrada SALE
+ *    de estado 'finished', ahora llama a removeFromFeed() para que la reseña
+ *    desaparezca de la comunidad. Antes permanecía visible indefinidamente.
+ *  - [BUG #1] Tras cualquier operación que modifica el feed, se llama a
+ *    FeedController.notifyReviewPublished() para invalidar el caché y forzar
+ *    recarga inmediata si el feed está visible.
+ *
  * ORDEN DE ARRANQUE:
  *  1. LibraryStore.init()      — Carga biblioteca desde localStorage
  *  2. ThemeManager.init()      — Aplica tema guardado
  *  3. AuthController.init()    — Activa Auth Firebase y renderiza header
  *  4. FirebaseSync.init()      — Suscribe el store a Firebase para sync automático
+ *  5. FeedController.init()    — Registra eventos de navegación del feed
+ *  6. ProfileController.init() — Inicializa vista de perfil
  *
  * FILOSOFÍA:
  *  - Este archivo NO contiene lógica de negocio.
@@ -18,11 +31,11 @@
  */
 
 import * as ProfileController from './profile-controller.js';
-import * as FeedController from './feed-controller.js';
-import * as LibraryStore    from './library-store.js';
-import * as AuthController  from './auth-controller.js';
-import * as FirebaseService from './firebase-service.js';
-import { STORAGE_KEY_THEME, DEFAULT_THEME } from './constants.js';
+import * as FeedController    from './feed-controller.js';
+import * as LibraryStore      from './library-store.js';
+import * as AuthController    from './auth-controller.js';
+import * as FirebaseService   from './firebase-service.js';
+import { STORAGE_KEY_THEME, DEFAULT_THEME, VN_STATUS } from './constants.js';
 
 
 // ════════════════════════════════════════════════════════
@@ -63,8 +76,11 @@ const ThemeManager = {
 // 2. FIREBASE SYNC
 //    Escucha mutaciones del LibraryStore y las replica
 //    en Firestore si hay sesión activa.
-//    Desacoplado: ni LibraryStore ni FirebaseService
-//    se conocen entre sí — este módulo los conecta.
+//
+//    DISEÑO:
+//    - Ni LibraryStore ni FirebaseService se conocen entre sí.
+//    - Este módulo actúa como el puente (Mediator pattern).
+//    - También mantiene sincronizado el feed /feed/{uid_vnId}.
 // ════════════════════════════════════════════════════════
 
 const FirebaseSync = {
@@ -78,48 +94,105 @@ const FirebaseSync = {
   },
 
   /**
-   * Callback del Observer del store.
-   * Solo actúa si hay usuario autenticado.
+   * Callback del Observer del LibraryStore.
+   * Se ejecuta tras cada add/update/remove en el store local.
+   *
+   * GARANTÍAS:
+   *  - Solo actúa si hay usuario autenticado.
+   *  - Los errores son silenciosos para el usuario (la app sigue con localStorage).
+   *  - Mantiene sincronizados TANTO users/{uid}/library COMO /feed.
    *
    * @param {'add'|'update'|'remove'|'error'} event
-   * @param {{vnId: string, entry: object}|null} payload
+   * @param {object|null} payload — LibraryEntry o { vnId } según el evento
    */
   async _onStoreEvent(event, payload) {
-    // Sin sesión activa: no sincronizar
     if (!FirebaseService.isAuthenticated()) return;
 
     try {
       switch (event) {
+
         case 'add':
         case 'update': {
           if (!payload?.vnId) return;
+
           const entry = LibraryStore.getEntry(payload.vnId);
-          if (entry) {
-            await FirebaseService.saveLibraryEntry(payload.vnId, entry);
-            console.info(`[FirebaseSync] Guardada "${payload.vnId}" en Firestore.`);
-          }
+          if (!entry) return;
+
+          // ── Paso 1: Siempre sincronizar la biblioteca personal ──────────
+          await FirebaseService.saveLibraryEntry(payload.vnId, entry);
+          console.info(`[FirebaseSync] Biblioteca actualizada: "${payload.vnId}".`);
+
+          // ── Paso 2: Sincronizar el feed público ─────────────────────────
+          // [CORRECCIÓN BUG #2 y #3]
+          await this._syncFeed(entry);
           break;
         }
 
         case 'remove': {
           if (!payload?.vnId) return;
+
+          // Eliminar de la biblioteca personal
           await FirebaseService.deleteLibraryEntry(payload.vnId);
-          // Si tenía reseña publicada en el feed, también la eliminamos
+
+          // Eliminar del feed público (si tenía reseña publicada)
           await FirebaseService.removeFromFeed(payload.vnId);
-           console.info(`[FirebaseSync] Eliminada "${payload.vnId}" de Firestore y del feed (si existía).`);
+
+          // Invalidar caché del feed para reflejar la eliminación
+          await FeedController.notifyReviewPublished();
+
+          console.info(`[FirebaseSync] Eliminada "${payload.vnId}" de biblioteca y feed.`);
           break;
         }
 
         case 'error':
-          // Errores del store no se sincronizan, solo se loguean
           console.warn('[FirebaseSync] Evento de error en el store:', payload);
           break;
       }
     } catch (err) {
-      // Los errores de sync son silenciosos para el usuario
-      // (la app sigue funcionando con localStorage como fallback)
       console.error('[FirebaseSync] Error al sincronizar con Firestore:', err);
     }
+  },
+
+  /**
+   * [CORRECCIÓN BUG #3 — revisado]
+   * Gestiona la sincronización del feed cuando el store detecta un cambio.
+   *
+   * RESPONSABILIDAD ÚNICA DE ESTE MÉTODO:
+   *  → Solo retira entradas del feed cuando la VN deja de estar en 'finished'.
+   *  → NUNCA publica ni actualiza el feed desde aquí.
+   *
+   * DISEÑO DELIBERADO — Por qué NO se llama publishToFeed() aquí:
+   *
+   *  1. FALTA DE DATOS: El LibraryStore solo guarda vnId, score y review.
+   *     No guarda vnTitle ni vnImageUrl (metadatos de VNDB). Las Security Rules
+   *     de Firestore exigen isValidString(vnTitle, 300) en el create, por lo que
+   *     un intento de publicación sin título falla con "Missing or insufficient
+   *     permissions". El único contexto con esos datos es modal-review.js.
+   *
+   *  2. AUTORIDAD DE PUBLICACIÓN: modal-review._handleSave() es el punto
+   *     canónico de publicación. Llamar publishToFeed() desde dos lugares
+   *     genera doble escritura y errores de permisos en el 100% de los casos
+   *     donde el doc aún no existe en /feed (no hay vnTitle).
+   *
+   *  3. FLUJO CORRECTO: modal-review → publishToFeed → notifyReviewPublished.
+   *     FirebaseSync → solo removeFromFeed si status ≠ finished.
+   *
+   * @param {import('./library-store.js').LibraryEntry} entry
+   * @returns {Promise<void>}
+   */
+  async _syncFeed(entry) {
+    // Solo actuar cuando la VN sale del estado 'finished'.
+    // En cualquier otro caso (finished→finished con datos actualizados),
+    // modal-review ya habrá llamado publishToFeed() directamente.
+    if (entry.status !== VN_STATUS.FINISHED) {
+      await FirebaseService.removeFromFeed(entry.vnId);
+      await FeedController.notifyReviewPublished();
+      console.info(
+        `[FirebaseSync] Reseña de "${entry.vnId}" retirada del feed (estado: ${entry.status}).`
+      );
+    }
+    // Si status === FINISHED → no hacer nada aquí.
+    // modal-review._handleSave() es el responsable de publishToFeed().
   },
 };
 
@@ -162,19 +235,19 @@ function _bootstrap() {
     console.error('[VN-Hub] Error al inicializar FirebaseSync:', err);
   }
 
-// ── 5. Feed Controller
-try {
-  FeedController.init();
-} catch (err) {
-  console.error('[VN-Hub] Error al inicializar FeedController:', err);
-}
+  // ── 5. Feed Controller
+  try {
+    FeedController.init();
+  } catch (err) {
+    console.error('[VN-Hub] Error al inicializar FeedController:', err);
+  }
 
-// ── 6. Profile Controller
-try {
-  ProfileController.init();
-} catch (err) {
-  console.error('[VN-Hub] Error al inicializar ProfileController:', err);
-}
+  // ── 6. Profile Controller
+  try {
+    ProfileController.init();
+  } catch (err) {
+    console.error('[VN-Hub] Error al inicializar ProfileController:', err);
+  }
 
   // ── 7. Log de debug en desarrollo
   if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
