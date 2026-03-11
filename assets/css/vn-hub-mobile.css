@@ -1,0 +1,840 @@
+/*
+ * vn-hub-mobile.css
+ * Sistema Mobile-First completo para VN-Hub
+ * Carga DESPUÉS de vn-hub-explore.css
+ */
+
+/* ── Variables Mobile ───────────────────────────── */
+:root {
+  --vh-hamburger-size: 44px;
+  --vh-bottom-bar-h:   60px;
+  --vh-ptr-threshold:  80px;
+  --vh-touch-min:      44px;
+  --vh-swipe-threshold: 60px;
+}
+
+/* ── 1. HAMBURGER BUTTON ────────────────────────── */
+.vh-hamburger {
+  display: none;
+  width:  var(--vh-hamburger-size);
+  height: var(--vh-hamburger-size);
+  border: 1.5px solid var(--vh-border);
+  background: var(--vh-bg-elevated);
+  border-radius: var(--vh-radius-md);
+  cursor: pointer;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0;
+  transition: all var(--vh-transition);
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.vh-hamburger:hover {
+  border-color: var(--vh-accent);
+  background: var(--vh-accent-soft);
+}
+.vh-hamburger:focus-visible {
+  outline: 2px solid var(--vh-accent);
+  outline-offset: 2px;
+}
+
+/* Las 3 líneas del icono */
+.vh-hamburger__bar {
+  display: block;
+  width: 20px;
+  height: 2px;
+  background: var(--vh-text-primary);
+  border-radius: 2px;
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity   0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transform-origin: center;
+}
+/* Estado abierto: X */
+[data-nav-open="true"] .vh-hamburger .vh-hamburger__bar:nth-child(1) {
+  transform: translateY(7px) rotate(45deg);
+}
+[data-nav-open="true"] .vh-hamburger .vh-hamburger__bar:nth-child(2) {
+  opacity: 0;
+  transform: scaleX(0);
+}
+[data-nav-open="true"] .vh-hamburger .vh-hamburger__bar:nth-child(3) {
+  transform: translateY(-7px) rotate(-45deg);
+}
+
+/* ── 2. NAV MOBILE DRAWER ───────────────────────── */
+@media (max-width: 767px) {
+
+  .vh-hamburger { display: flex; }
+
+  /* El nav se convierte en drawer deslizable */
+  .vh-main-nav {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: min(280px, 85vw);
+    height: 100dvh;
+    height: 100vh;          /* fallback */
+    z-index: 300;
+    border-bottom: none;
+    border-right: 1.5px solid var(--vh-border);
+    display: flex;
+    flex-direction: column;
+    padding-top: 4rem;
+    transform: translateX(-100%);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+                box-shadow 0.3s ease;
+    will-change: transform;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  [data-nav-open="true"] .vh-main-nav {
+    transform: translateX(0);
+    box-shadow: var(--vh-shadow-lg), 8px 0 32px rgba(0,0,0,0.15);
+  }
+
+  /* El contenedor de la lista se expande en el drawer */
+  .vh-main-nav .vh-container {
+    padding: 0;
+    width: 100%;
+  }
+
+  .vh-nav__list {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+    padding: 1rem 1.25rem;
+  }
+
+  .vh-nav__btn {
+    width: 100%;
+    padding: 0.85rem 1.25rem;
+    border-radius: var(--vh-radius-md);
+    font-size: 1rem;
+    justify-content: flex-start;
+    min-height: var(--vh-touch-min);
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .vh-nav__btn--active {
+    background: var(--vh-accent);
+    color: var(--vh-text-on-accent);
+  }
+
+  /* Overlay oscuro detrás del drawer */
+  .vh-nav-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 299;
+    background: rgba(0,0,0,0.45);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
+  }
+  [data-nav-open="true"] .vh-nav-overlay {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+/* ── 3. HEADER MOBILE ───────────────────────────── */
+@media (max-width: 767px) {
+
+  .vh-header {
+    padding: 0.75rem 0;
+    position: sticky;
+    top: 0;
+    z-index: 200;
+  }
+
+  .vh-header__inner {
+    flex-wrap: nowrap;
+    gap: 0.5rem;
+    align-items: center;
+    padding: 0 1rem;
+  }
+
+  /* Hamburger primero en mobile */
+  .vh-hamburger { order: -1; }
+
+  .vh-header__brand {
+    flex: 1;
+    min-width: 0;
+    gap: 0.35rem;
+  }
+
+  .vh-header__title {
+    font-size: clamp(1.2rem, 5vw, 1.6rem);
+    white-space: nowrap;
+  }
+
+  .vh-header__logo {
+    font-size: 1.2rem;
+  }
+
+  .vh-header__tagline { display: none; }
+
+  .vh-header__controls {
+    gap: 0.5rem;
+    flex-shrink: 0;
+  }
+
+  /* Theme toggle y auth siempre accesibles */
+  .vh-theme-toggle {
+    width: 40px;
+    height: 40px;
+    font-size: 1rem;
+  }
+}
+
+/* ── 4. LAYOUT & CONTAINER MOBILE ───────────────── */
+@media (max-width: 767px) {
+
+  .vh-container {
+    padding: 0 1rem;
+  }
+
+  .vh-view {
+    padding: 1.25rem 0 calc(var(--vh-bottom-bar-h) + 2rem);
+  }
+}
+
+/* ── 5. GRID FLUIDO MOBILE ──────────────────────── */
+
+/* 320px: 1 columna */
+.vh-cards-grid {
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 0.85rem;
+}
+
+@media (max-width: 360px) {
+  .vh-cards-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.65rem;
+  }
+}
+
+@media (min-width: 361px) and (max-width: 480px) {
+  .vh-cards-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.85rem;
+  }
+}
+
+@media (min-width: 481px) and (max-width: 639px) {
+  .vh-cards-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+  }
+}
+
+@media (min-width: 640px) and (max-width: 767px) {
+  .vh-cards-grid {
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 1.1rem;
+  }
+}
+
+/* ── 6. CARDS TOUCH-OPTIMIZED ───────────────────── */
+@media (max-width: 767px) {
+
+  .vh-card {
+    /* Eliminar hover transform en touch - se activa con :active */
+    transition: box-shadow var(--vh-transition), border-color var(--vh-transition);
+  }
+
+  .vh-card:hover {
+    transform: none; /* sin translate en touch */
+  }
+
+  .vh-card:active {
+    transform: scale(0.97);
+    box-shadow: var(--vh-shadow-sm);
+  }
+
+  /* Footer con área táctil generosa */
+  .vh-card__footer {
+    padding: 0 0.75rem 0.75rem;
+    gap: 0.4rem;
+  }
+
+  .vh-card__add-btn,
+  .vh-card__change-btn,
+  .vh-card__edit-btn {
+    min-height: var(--vh-touch-min);
+    font-size: 0.82rem;
+    padding: 0.55rem 0.6rem;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .vh-card__remove-btn {
+    min-width: var(--vh-touch-min);
+    min-height: var(--vh-touch-min);
+    width: auto;
+    padding: 0 0.6rem;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Reducir body padding en cards pequeñas */
+  .vh-card__body {
+    padding: 0.65rem 0.75rem;
+    gap: 0.35rem;
+  }
+
+  .vh-card__title {
+    font-size: 0.82rem;
+  }
+}
+
+/* ── 7. SECTION HEADER MOBILE ───────────────────── */
+@media (max-width: 767px) {
+
+  .vh-section-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+    margin-bottom: 1.25rem;
+  }
+
+  .vh-section-title {
+    font-size: clamp(1.3rem, 5vw, 1.65rem);
+  }
+
+  .vh-library-stats {
+    gap: 0.4rem;
+  }
+
+  .vh-stat-pill {
+    font-size: 0.75rem;
+    padding: 0.2rem 0.6rem;
+  }
+}
+
+/* ── 8. SEARCH BAR MOBILE ───────────────────────── */
+@media (max-width: 767px) {
+
+  .vh-search-bar {
+    margin-bottom: 1.25rem;
+  }
+
+  .vh-search-bar__wrapper {
+    max-width: 100%;
+    padding: 0.15rem 0.15rem 0.15rem 1rem;
+    border-radius: var(--vh-radius-lg);
+  }
+
+  .vh-search-bar__input {
+    font-size: 1rem; /* Previene zoom automático en iOS ≥ 16px */
+    padding: 0.7rem 0;
+  }
+
+  .vh-search-bar__clear {
+    width: 40px;
+    height: 40px;
+    touch-action: manipulation;
+  }
+}
+
+/* ── 9. TABS MOBILE ─────────────────────────────── */
+@media (max-width: 767px) {
+
+  .vh-tabs {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x mandatory;
+    padding-bottom: 0.15rem;
+    gap: 0.4rem;
+  }
+  .vh-tabs::-webkit-scrollbar { display: none; }
+
+  .vh-tab {
+    flex-shrink: 0;
+    white-space: nowrap;
+    scroll-snap-align: start;
+    min-height: var(--vh-touch-min);
+    padding: 0.55rem 0.85rem;
+    font-size: 0.85rem;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .vh-tab__label {
+    font-size: 0.82rem;
+  }
+}
+
+/* ── 10. PULL-TO-REFRESH ────────────────────────── */
+
+/* Indicador visual de PTR */
+.vh-ptr {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%) translateY(-100%);
+  z-index: 250;
+  width: 40px;
+  height: 40px;
+  background: var(--vh-bg-surface);
+  border: 1.5px solid var(--vh-border);
+  border-radius: var(--vh-radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--vh-shadow-md);
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: none;
+  will-change: transform;
+}
+
+.vh-ptr--visible {
+  transform: translateX(-50%) translateY(calc(var(--ptr-progress, 0) * 72px - 20px));
+}
+
+.vh-ptr--triggered {
+  transform: translateX(-50%) translateY(52px);
+}
+
+/* Spinner inside PTR */
+.vh-ptr__spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--vh-border);
+  border-top-color: var(--vh-accent);
+  border-radius: 50%;
+  animation: none;
+  transition: transform 0.15s ease;
+  transform: rotate(calc(var(--ptr-rotation, 0) * 1deg));
+}
+
+.vh-ptr--loading .vh-ptr__spinner {
+  animation: vh-spin 0.7s linear infinite;
+  transform: none;
+}
+
+/* ── 11. SWIPE HINT (primera visita) ─────────────── */
+.vh-swipe-hint {
+  display: none;
+  position: fixed;
+  bottom: calc(var(--vh-bottom-bar-h) + 1.5rem);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--vh-bg-surface);
+  border: 1px solid var(--vh-border);
+  border-radius: var(--vh-radius-full);
+  padding: 0.5rem 1rem;
+  font-size: 0.78rem;
+  color: var(--vh-text-muted);
+  box-shadow: var(--vh-shadow-md);
+  gap: 0.4rem;
+  align-items: center;
+  z-index: 150;
+  white-space: nowrap;
+  animation: vh-swipe-hint-fade 3.5s ease forwards;
+  pointer-events: none;
+}
+
+@keyframes vh-swipe-hint-fade {
+  0%   { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  20%  { opacity: 1; transform: translateX(-50%) translateY(0);   }
+  80%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@media (max-width: 767px) {
+  .vh-swipe-hint--show { display: flex; }
+}
+
+/* ── 12. BOTTOM NAVIGATION BAR ──────────────────── */
+
+.vh-bottom-nav {
+  display: none;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: var(--vh-bottom-bar-h);
+  background: var(--vh-bg-surface);
+  backdrop-filter: var(--vh-glass-blur);
+  -webkit-backdrop-filter: var(--vh-glass-blur);
+  border-top: 1.5px solid var(--vh-border);
+  box-shadow: 0 -4px 20px rgba(0,0,0,0.08);
+  z-index: 200;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  transition: background var(--vh-transition-slow),
+              border-color var(--vh-transition-slow);
+}
+
+@media (max-width: 767px) {
+  .vh-bottom-nav { display: flex; }
+}
+
+.vh-bottom-nav__list {
+  list-style: none;
+  display: flex;
+  width: 100%;
+  height: 100%;
+}
+
+.vh-bottom-nav__item {
+  flex: 1;
+}
+
+.vh-bottom-nav__btn {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--vh-text-muted);
+  font-family: inherit;
+  font-size: 0.65rem;
+  font-weight: 500;
+  transition: color var(--vh-transition);
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  position: relative;
+  padding: 0;
+}
+
+.vh-bottom-nav__btn:active {
+  transform: scale(0.92);
+}
+
+.vh-bottom-nav__icon {
+  font-size: 1.3rem;
+  line-height: 1;
+  display: block;
+  transition: transform var(--vh-transition);
+}
+
+.vh-bottom-nav__label {
+  display: block;
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
+
+.vh-bottom-nav__btn--active {
+  color: var(--vh-accent);
+}
+
+.vh-bottom-nav__btn--active .vh-bottom-nav__icon {
+  transform: scale(1.15) translateY(-1px);
+}
+
+/* Punto indicador activo */
+.vh-bottom-nav__btn--active::after {
+  content: '';
+  position: absolute;
+  bottom: 6px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--vh-accent);
+  display: block;
+}
+
+/* Badge de count (para notificaciones futuras) */
+.vh-bottom-nav__badge {
+  position: absolute;
+  top: 6px;
+  right: calc(50% - 18px);
+  background: var(--vh-accent);
+  color: #fff;
+  font-size: 0.6rem;
+  font-weight: 700;
+  min-width: 16px;
+  height: 16px;
+  border-radius: var(--vh-radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 3px;
+  line-height: 1;
+  border: 2px solid var(--vh-bg-surface);
+}
+.vh-bottom-nav__badge[hidden] { display: none; }
+
+/* ── 13. STATUS MENU MOBILE (bottom sheet) ────────── */
+@media (max-width: 767px) {
+
+  .vh-status-menu {
+    position: fixed;
+    bottom: calc(var(--vh-bottom-bar-h) + 0.75rem);
+    left: 1rem;
+    right: 1rem;
+    top: auto;
+    min-width: unset;
+    max-width: none;
+    border-radius: var(--vh-radius-xl);
+    z-index: 510;
+    padding: 1rem;
+    animation: vh-bottom-sheet-in 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+  }
+
+  @keyframes vh-bottom-sheet-in {
+    from { transform: translateY(20px); opacity: 0; }
+    to   { transform: translateY(0);    opacity: 1; }
+  }
+
+  .vh-status-menu__list { gap: 0.4rem; }
+
+  .vh-status-menu__option {
+    min-height: var(--vh-touch-min);
+    font-size: 0.95rem;
+    border-radius: var(--vh-radius-md);
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+/* ── 14. MODALES MOBILE ─────────────────────────── */
+@media (max-width: 767px) {
+
+  /* Modales como bottom sheets en móvil */
+  .vh-modal {
+    margin: auto 0 0 0;
+    border-radius: var(--vh-radius-xl) var(--vh-radius-xl) 0 0;
+    max-height: 92dvh;
+    max-height: 92vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    animation: vh-modal-up 0.32s cubic-bezier(0.34, 1.2, 0.64, 1);
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1.5rem);
+  }
+
+  .vh-modal-backdrop {
+    align-items: flex-end;
+  }
+
+  @keyframes vh-modal-up {
+    from { transform: translateY(100%); opacity: 0.6; }
+    to   { transform: translateY(0);    opacity: 1;   }
+  }
+
+  /* Handle visual para drag */
+  .vh-modal::before {
+    content: '';
+    display: block;
+    width: 36px;
+    height: 4px;
+    background: var(--vh-border);
+    border-radius: 2px;
+    margin: 0 auto 1rem;
+  }
+
+  .vh-modal--sm {
+    max-width: 100%;
+    width: 100%;
+  }
+
+  /* Botones en modales — ancho completo */
+  .vh-modal__footer .vh-btn {
+    flex: 1;
+    min-height: var(--vh-touch-min);
+    touch-action: manipulation;
+  }
+}
+
+/* ── 15. PAGINATION MOBILE ──────────────────────── */
+@media (max-width: 767px) {
+
+  .vh-pagination {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    justify-content: center;
+  }
+
+  .vh-pagination .vh-btn {
+    min-height: var(--vh-touch-min);
+    flex: 1;
+    min-width: 100px;
+    max-width: 160px;
+    touch-action: manipulation;
+  }
+
+  .vh-pagination__info {
+    order: -1;
+    width: 100%;
+    text-align: center;
+    font-size: 0.85rem;
+  }
+}
+
+/* ── 16. TOAST MOBILE ───────────────────────────── */
+@media (max-width: 767px) {
+
+  .vh-toast {
+    left: 1rem;
+    right: 1rem;
+    bottom: calc(var(--vh-bottom-bar-h) + 1rem);
+    max-width: none;
+    width: auto;
+    text-align: center;
+    justify-content: center;
+  }
+}
+
+/* ── 17. SKELETON LOADERS ───────────────────────── */
+
+@keyframes vh-skeleton-pulse {
+  0%   { opacity: 1; }
+  50%  { opacity: 0.4; }
+  100% { opacity: 1; }
+}
+
+.vh-skeleton {
+  background: var(--vh-border);
+  border-radius: var(--vh-radius-sm);
+  animation: vh-skeleton-pulse 1.4s ease-in-out infinite;
+  pointer-events: none;
+  user-select: none;
+}
+
+.vh-card--skeleton .vh-card__cover-wrapper {
+  background: var(--vh-border);
+  animation: vh-skeleton-pulse 1.4s ease-in-out infinite;
+}
+
+.vh-card--skeleton .vh-card__body > * {
+  visibility: hidden;
+}
+
+.vh-card--skeleton .vh-card__body::before,
+.vh-card--skeleton .vh-card__body::after {
+  content: '';
+  display: block;
+  height: 12px;
+  border-radius: 6px;
+  background: var(--vh-border);
+  animation: vh-skeleton-pulse 1.4s ease-in-out infinite;
+  margin-bottom: 8px;
+}
+.vh-card--skeleton .vh-card__body::after {
+  width: 60%;
+  animation-delay: 0.2s;
+}
+
+
+/* ── 19. EXPLORE PANEL MOBILE ────────────────────── */
+@media (max-width: 767px) {
+
+  /* Los botones de filtro rápido en grid 2×2 */
+  .vep-quick {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 0.6rem;
+  }
+
+  .vep-quick__btn {
+    min-height: var(--vh-touch-min);
+    padding: 0.6rem 0.5rem;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .vep-quick__meta {
+    display: none; /* ocultar en móvil para ganar espacio */
+  }
+
+  /* Tags en scroll horizontal */
+  .vep-tags {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x mandatory;
+    padding-bottom: 4px;
+  }
+  .vep-tags::-webkit-scrollbar { display: none; }
+
+  .vep-tag {
+    flex-shrink: 0;
+    scroll-snap-align: start;
+    min-height: 36px;
+    touch-action: manipulation;
+  }
+
+  /* Year chips en 2 filas */
+  .vep-year__presets {
+    flex-wrap: wrap;
+    gap: 0.4rem;
+  }
+
+  .vep-year__chip {
+    min-height: 36px;
+    touch-action: manipulation;
+  }
+}
+
+/* ── 20. SAFE AREA INSETS (notch/islands) ────────── */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .vh-bottom-nav {
+    padding-bottom: env(safe-area-inset-bottom);
+    height: calc(var(--vh-bottom-bar-h) + env(safe-area-inset-bottom));
+  }
+  .vh-view {
+    padding-bottom: calc(var(--vh-bottom-bar-h) + env(safe-area-inset-bottom) + 1rem);
+  }
+  @media (max-width: 767px) {
+    .vh-toast {
+      bottom: calc(var(--vh-bottom-bar-h) + env(safe-area-inset-bottom) + 0.75rem);
+    }
+  }
+}
+
+/* ── 21. WCAG 2.1 AA — TOUCH TARGETS ────────────── */
+
+/*
+ * WCAG 2.5.5: Todos los targets interactivos mínimo 44×44px.
+ * Se aplica globalmente en breakpoints touch.
+ */
+@media (max-width: 767px) {
+
+  /* Garantía universal de target táctil */
+  button, [role="button"], [role="tab"], [role="menuitem"],
+  a[href], input, select, textarea {
+    min-height: var(--vh-touch-min);
+  }
+
+  /* Excepción: elementos display:inline en texto */
+  p a, li a { min-height: unset; }
+
+  /* Focus visible mejorado para touch (ring más grueso) */
+  :focus-visible {
+    outline: 3px solid var(--vh-accent);
+    outline-offset: 3px;
+  }
+}
+
+/* ── 22. REDUCED MOTION ──────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .vh-ptr__spinner  { animation: none; }
+  .vh-skeleton,
+  .vh-card--skeleton .vh-card__cover-wrapper,
+  .vh-card--skeleton .vh-card__body::before,
+  .vh-card--skeleton .vh-card__body::after { animation: none; opacity: 0.6; }
+  .vh-main-nav      { transition: none; }
+  .vh-bottom-nav__btn:active { transform: none; }
+  .vh-swipe-hint    { animation: none; }
+}
+
+/* ── 23. HIGH CONTRAST MODE ──────────────────────── */
+@media (forced-colors: active) {
+  .vh-hamburger__bar { background: ButtonText; }
+  .vh-bottom-nav__btn--active { forced-color-adjust: none; }
+  .vh-ptr { border: 2px solid ButtonText; }
+}

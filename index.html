@@ -2,25 +2,50 @@
 <html lang="es" data-theme="light">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!--
+    viewport-fit=cover: respeta el área segura en dispositivos con notch/dynamic island.
+    Combinado con env(safe-area-inset-*) en vn-hub-mobile.css para no solapar contenido.
+  -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <title>VN-Hub — Tu Biblioteca de Visual Novels</title>
 
+  <!-- PWA: color de la barra de sistema según el tema activo del SO -->
+  <meta name="theme-color" content="#c0627a" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#0a0608"  media="(prefers-color-scheme: dark)" />
+
+  <!-- PWA: instalación como app nativa en Android / iOS -->
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="manifest" href="manifest.json" />
+
+  <!-- Fuentes: preconnect reduce latencia de DNS + TLS -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
 
+  <!--
+    Hojas de estilo — ORDEN CRÍTICO:
+    base → componentes → módulos → mobile-override
+    vn-hub-mobile.css DEBE ser el último para que sus overrides tengan precedencia.
+  -->
   <link rel="stylesheet" href="assets/css/vn-hub.css" />
   <link rel="stylesheet" href="assets/css/vn-hub-components.css" />
   <link rel="stylesheet" href="assets/css/vn-hub-export.css" />
   <link rel="stylesheet" href="assets/css/vn-hub-profile.css" />
   <!-- ► v6: Estilos del módulo de Exploración Rápida -->
   <link rel="stylesheet" href="assets/css/vn-hub-explore.css" />
+  <!-- ► v7: Sistema Mobile-First (hamburger, bottom nav, gestos, PTR, WCAG táctil) -->
+  <link rel="stylesheet" href="assets/css/vn-hub-mobile.css" />
 </head>
 
 <body>
 
   <!-- ═══════════════════════════════════════════════════════════════
        HEADER
+       Nota mobile: MobileNavManager.init() inyecta el botón
+       .vh-hamburger como primer hijo de .vh-header__inner.
+       No se requiere cambio estático aquí.
   ═══════════════════════════════════════════════════════════════ -->
   <header class="vh-header">
     <div class="vh-container vh-header__inner">
@@ -50,6 +75,10 @@
 
   <!-- ═══════════════════════════════════════════════════════════════
        NAVEGACIÓN PRINCIPAL
+       Desktop (≥768px): barra horizontal bajo el header.
+       Mobile  (≤767px): drawer lateral deslizable activado por el
+       botón hamburger. MobileNavManager le asigna id="vhMainNav"
+       y gestiona apertura/cierre + overlay + foco de accesibilidad.
   ═══════════════════════════════════════════════════════════════ -->
   <nav class="vh-main-nav" role="navigation" aria-label="Navegación principal">
     <div class="vh-container">
@@ -144,7 +173,9 @@
       </div>
 
       <!-- ═══════════════════════════════════════════════════════════
-           MÓDULO DE EXPLORACIÓN RÁPIDA
+           MÓDULO DE EXPLORACIÓN RÁPIDA (v6)
+           Posición: debajo del buscador, encima de los resultados.
+           Controlado por js/explore-controller.js
       ════════════════════════════════════════════════════════════ -->
       <section class="vep-panel" id="vepPanel" aria-label="Exploración rápida de visual novels">
 
@@ -391,6 +422,7 @@
 
   <!-- ═══════════════════════════════════════════════════════════════
        MENÚ FLOTANTE: AÑADIR / CAMBIAR ESTADO
+       En mobile (≤767px) se convierte en bottom sheet vía CSS.
   ═══════════════════════════════════════════════════════════════ -->
   <div class="vh-status-menu" id="statusMenu" role="menu"
     aria-label="Seleccionar estado para la biblioteca" hidden>
@@ -428,6 +460,7 @@
 
   <!-- ═══════════════════════════════════════════════════════════════
        TOAST DE NOTIFICACIONES
+       En mobile se posiciona sobre el bottom nav bar vía CSS.
   ═══════════════════════════════════════════════════════════════ -->
   <div class="vh-toast" id="toast" role="status"
     aria-live="polite" aria-atomic="true" hidden>
@@ -436,6 +469,30 @@
   </div>
 
 
+  <!-- ═══════════════════════════════════════════════════════════════
+       SERVICE WORKER — Registro inline
+       Solo activo en HTTPS o localhost (GitHub Pages cumple HTTPS).
+       No usa type="module" para máxima compatibilidad de registro.
+  ═══════════════════════════════════════════════════════════════ -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker
+          .register('./sw.js', { scope: './' })
+          .then(reg  => console.info('[VN-Hub] SW registrado. Scope:', reg.scope))
+          .catch(err => console.warn('[VN-Hub] SW no pudo registrarse:', err));
+      });
+    }
+  </script>
+
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       MÓDULOS JS
+       app-init.js es el punto de entrada: importa y orquesta todos
+       los demás módulos, incluido mobile-gestures.js desde v7.
+       Los scripts de los controladores se cargan en paralelo por
+       el navegador gracias a type="module" (defer implícito).
+  ═══════════════════════════════════════════════════════════════ -->
   <script type="module" src="js/app-init.js"></script>
   <script type="module" src="js/auth-controller.js"></script>
   <script type="module" src="js/render-engine.js"></script>

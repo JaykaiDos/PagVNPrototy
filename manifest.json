@@ -1,0 +1,24 @@
+{
+  "name": "VN-Hub — Tu Biblioteca de Visual Novels",
+  "short_name": "VN-Hub",
+  "description": "Biblioteca personal de Visual Novels con integración VNDB",
+  "start_url": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f5f5f5",
+  "theme_color": "#c0627a",
+  "lang": "es",
+  "categories": ["entertainment", "books"],
+  "shortcuts": [
+    {
+      "name": "Buscar VNs",
+      "url": "./?view=search",
+      "description": "Buscar visual novels en VNDB"
+    },
+    {
+      "name": "Mi Biblioteca",
+      "url": "./?view=library",
+      "description": "Ver tu biblioteca personal"
+    }
+  ]
+}

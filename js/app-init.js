@@ -16,6 +16,11 @@
  *    FeedController.notifyReviewPublished() para invalidar el caché y forzar
  *    recarga inmediata si el feed está visible.
  *
+ * NOVEDAD v7 — Sistema Mobile:
+ *  - Paso 8 del bootstrap inicializa MobileNavManager, SwipeNavigator,
+ *    PullToRefresh y LazyImageManager desde mobile-gestures.js.
+ *  - Cada módulo falla de forma aislada (no bloquea los demás).
+ *
  * ORDEN DE ARRANQUE:
  *  1. LibraryStore.init()      — Carga biblioteca desde localStorage
  *  2. ThemeManager.init()      — Aplica tema guardado
@@ -23,6 +28,8 @@
  *  4. FirebaseSync.init()      — Suscribe el store a Firebase para sync automático
  *  5. FeedController.init()    — Registra eventos de navegación del feed
  *  6. ProfileController.init() — Inicializa vista de perfil
+ *  7. (debug)                  — Log de store events en localhost
+ *  8. MobileSystem.init()      — Hamburger, bottom nav, swipe, PTR, lazy images
  *
  * FILOSOFÍA:
  *  - Este archivo NO contiene lógica de negocio.
@@ -35,6 +42,12 @@ import * as FeedController    from './feed-controller.js';
 import * as LibraryStore      from './library-store.js';
 import * as AuthController    from './auth-controller.js';
 import * as FirebaseService   from './firebase-service.js';
+import {
+  SwipeNavigator,
+  PullToRefresh,
+  MobileNavManager,
+  LazyImageManager,
+} from './mobile-gestures.js';
 import { STORAGE_KEY_THEME, DEFAULT_THEME, VN_STATUS } from './constants.js';
 
 
@@ -198,7 +211,153 @@ const FirebaseSync = {
 
 
 // ════════════════════════════════════════════════════════
-// 3. BOOTSTRAP
+// 3. MOBILE SYSTEM (v7)
+//    Agrupa la inicialización de todos los módulos táctiles.
+//    Separado en su propia sección para claridad y aislamiento.
+// ════════════════════════════════════════════════════════
+
+/**
+ * IDs de los botones de navegación en el orden deseado para el swipe.
+ * El orden aquí es el orden de navegación izquierda→derecha.
+ * @type {string[]}
+ */
+const NAV_VIEW_IDS = ['navSearch', 'navLibrary', 'navFeed', 'navProfile'];
+
+/**
+ * Obtiene el data-view de la vista activa en este momento.
+ * @returns {string}
+ */
+function _getActiveViewId() {
+  return document.querySelector('.vh-view:not([hidden])')?.dataset?.view ?? '';
+}
+
+/**
+ * Inicializa todos los módulos del sistema mobile.
+ * Se ejecuta como paso 8 del bootstrap, DESPUÉS de que todos
+ * los controladores estén listos (nav items pueden estar ocultos
+ * hasta que AuthController renderice el header).
+ *
+ * Cada sub-módulo falla de forma aislada.
+ */
+function _initMobileSystem() {
+
+  // ── 8a. MobileNavManager ─────────────────────────────────────
+  // Inyecta hamburger, overlay del drawer y bottom nav bar.
+  // Gestiona apertura/cierre del drawer con foco de accesibilidad.
+  try {
+    MobileNavManager.init();
+
+    // Sincronizar el bottom bar cuando ui-controller cambia de vista
+    document.querySelectorAll('.vh-nav__btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        MobileNavManager.syncActiveView(btn.dataset.view ?? '');
+      });
+    });
+
+    // Sincronizar el estado inicial (la vista activa al arrancar es "search")
+    MobileNavManager.syncActiveView(_getActiveViewId());
+
+  } catch (err) {
+    console.error('[VN-Hub] Error al inicializar MobileNavManager:', err);
+  }
+
+  // ── 8b. SwipeNavigator ───────────────────────────────────────
+  // Swipe horizontal izquierda/derecha para cambiar entre vistas.
+  // Solo activo en dispositivos táctiles y sin prefers-reduced-motion.
+  try {
+    SwipeNavigator.init({
+      views:       NAV_VIEW_IDS,
+      threshold:   60,   // px mínimos para registrar swipe
+      maxVertical: 80,   // px máximos de desviación vertical permitida
+      onSwipe: (_direction, viewBtnId) => {
+        // El SwipeNavigator ya disparó el click en el botón;
+        // aquí solo sincronizamos el estado visual del bottom bar.
+        const viewId = document.getElementById(viewBtnId)?.dataset?.view ?? '';
+        MobileNavManager.syncActiveView(viewId);
+      },
+    });
+  } catch (err) {
+    console.error('[VN-Hub] Error al inicializar SwipeNavigator:', err);
+  }
+
+  // ── 8c. PullToRefresh ────────────────────────────────────────
+  // Pull-down desde el tope de la página para recargar la vista activa.
+  // El callback determina qué acción realizar según la vista visible.
+  try {
+    PullToRefresh.init({
+      threshold: 80,   // px de arrastre necesarios para activar
+      maxPull:   120,  // px máximos de arrastre visual
+
+      /**
+       * Callback ejecutado cuando el usuario completa el pull.
+       * Recarga la vista activa de forma específica por tipo.
+       * @returns {Promise<void>}
+       */
+      onRefresh: async () => {
+        const activeViewId = _getActiveViewId();
+
+        switch (activeViewId) {
+          case 'search': {
+            // Re-disparar la búsqueda o exploración activa
+            const searchInput = document.getElementById('searchInput');
+            if (searchInput?.value?.trim()) {
+              searchInput.dispatchEvent(new Event('input', { bubbles: true }));
+            } else {
+              // Si no hay búsqueda activa, re-disparar el filtro de exploración activo
+              const activeExploreBtn = document.querySelector('.vep-quick__btn[aria-pressed="true"]');
+              activeExploreBtn?.click();
+            }
+            break;
+          }
+
+          case 'library': {
+            // El store ya es reactivo; emitir un evento artificial de refresh
+            // para que render-engine re-pinte la vista.
+            document.dispatchEvent(new CustomEvent('vnh:library:refresh'));
+            break;
+          }
+
+          case 'feed': {
+            // Invalidar caché y forzar recarga del feed
+            await FeedController.notifyReviewPublished?.();
+            break;
+          }
+
+          case 'profile': {
+            // Forzar recarga del perfil re-renderizando el componente
+            document.dispatchEvent(new CustomEvent('vnh:profile:refresh'));
+            break;
+          }
+        }
+
+        // Tiempo mínimo de feedback visual para que el spinner no desaparezca
+        // de forma abrupta en cargas rápidas (localStorage/cache)
+        await new Promise(resolve => setTimeout(resolve, 500));
+      },
+    });
+  } catch (err) {
+    console.error('[VN-Hub] Error al inicializar PullToRefresh:', err);
+  }
+
+  // ── 8d. LazyImageManager ─────────────────────────────────────
+  // Observa imágenes con loading="lazy" y aplica fade-in suave al
+  // entrar al viewport. Llamar observeAll() tras cada render de cards.
+  try {
+    LazyImageManager.init();
+
+    // Re-observar tras cada render de cards nuevo
+    // render-engine.js debe disparar este evento tras renderizar
+    document.addEventListener('vnh:cards:rendered', () => {
+      LazyImageManager.observeAll();
+    });
+  } catch (err) {
+    console.error('[VN-Hub] Error al inicializar LazyImageManager:', err);
+  }
+}
+
+
+// ════════════════════════════════════════════════════════
+// 4. BOOTSTRAP
 // ════════════════════════════════════════════════════════
 
 /**
@@ -255,6 +414,9 @@ function _bootstrap() {
       console.debug(`[LibraryStore] ${event}:`, payload?.vnId ?? payload);
     });
   }
+  requestAnimationFrame(() => {
+    _initMobileSystem();
+  });
 
   console.info('[VN-Hub] Aplicación inicializada ✓');
 }
