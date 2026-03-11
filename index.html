@@ -11,9 +11,9 @@
 
   <link rel="stylesheet" href="assets/css/vn-hub.css" />
   <link rel="stylesheet" href="assets/css/vn-hub-components.css" />
-
-  <!-- ► v4: Estilos del módulo de exportación PNG por sección -->
   <link rel="stylesheet" href="assets/css/vn-hub-export.css" />
+  <!-- ► v5: Estilos del módulo de Perfil de Usuario -->
+  <link rel="stylesheet" href="assets/css/vn-hub-profile.css" />
 </head>
 
 <body>
@@ -24,24 +24,15 @@
   <header class="vh-header">
     <div class="vh-container vh-header__inner">
 
-      <!-- Identidad -->
       <div class="vh-header__brand">
         <span class="vh-header__logo" aria-hidden="true">✦</span>
         <h1 class="vh-header__title">VN<span class="vh-header__accent">Hub</span></h1>
         <p class="vh-header__tagline">Tu biblioteca personal de Visual Novels</p>
       </div>
 
-      <!-- Controles globales -->
       <div class="vh-header__controls">
-
-        <!--
-          AUTH CONTAINER
-          auth-controller.js inyecta aquí el botón de login
-          o el menú de usuario según el estado de autenticación.
-        -->
         <div id="authContainer" class="vh-auth-container"></div>
 
-        <!-- Botón toggle tema -->
         <button
           class="vh-theme-toggle"
           id="themeToggle"
@@ -50,7 +41,6 @@
         >
           <span class="vh-theme-toggle__icon" aria-hidden="true"></span>
         </button>
-
       </div>
 
     </div>
@@ -85,7 +75,7 @@
           </button>
         </li>
 
-        <!-- TAB FEED — visible solo si hay sesión activa (auth-controller lo muestra/oculta) -->
+        <!-- TAB FEED — visible solo si hay sesión activa -->
         <li id="navFeedItem" hidden>
           <button
             class="vh-nav__btn"
@@ -93,6 +83,17 @@
             data-view="feed"
           >
             <span aria-hidden="true">🌐</span> Comunidad
+          </button>
+        </li>
+
+        <!-- TAB PERFIL — visible solo si hay sesión activa -->
+        <li id="navProfileItem" hidden>
+          <button
+            class="vh-nav__btn"
+            id="navProfile"
+            data-view="profile"
+          >
+            <span aria-hidden="true">👤</span> Perfil
           </button>
         </li>
 
@@ -198,11 +199,6 @@
 
       </div>
 
-      <!--
-        TABPANEL: TODOS
-        El botón de exportación NO aparece aquí (solo en secciones de estado específico).
-        _injectExportButtons() opera solo sobre los 4 paneles de estado.
-      -->
       <div class="vh-tabpanel" id="tabpanel-all" role="tabpanel" aria-labelledby="tab-all" aria-live="polite">
         <div class="vh-cards-grid" data-panel-grid="all" role="list"></div>
         <div class="vh-empty-state" data-empty="all" hidden>
@@ -211,11 +207,6 @@
         </div>
       </div>
 
-      <!--
-        TABPANEL: PENDIENTE
-        ► v4: _injectExportButtons() inyecta aquí .vh-section-actions con el botón 📸
-              si hay al menos 1 VN en esta sección.
-      -->
       <div class="vh-tabpanel vh-tabpanel--hidden" id="tabpanel-pending" role="tabpanel"
         aria-labelledby="tab-pending" aria-live="polite" hidden>
         <div class="vh-cards-grid" data-panel-grid="pending" role="list"></div>
@@ -224,11 +215,6 @@
         </div>
       </div>
 
-      <!--
-        TABPANEL: JUGANDO
-        ► v4: _injectExportButtons() inyecta aquí .vh-section-actions con el botón 📸
-              si hay al menos 1 VN en esta sección.
-      -->
       <div class="vh-tabpanel vh-tabpanel--hidden" id="tabpanel-playing" role="tabpanel"
         aria-labelledby="tab-playing" aria-live="polite" hidden>
         <div class="vh-cards-grid" data-panel-grid="playing" role="list"></div>
@@ -237,11 +223,6 @@
         </div>
       </div>
 
-      <!--
-        TABPANEL: FINALIZADO
-        ► v4: _injectExportButtons() inyecta aquí .vh-section-actions con el botón 📸
-              si hay al menos 1 VN en esta sección.
-      -->
       <div class="vh-tabpanel vh-tabpanel--hidden" id="tabpanel-finished" role="tabpanel"
         aria-labelledby="tab-finished" aria-live="polite" hidden>
         <div class="vh-cards-grid" data-panel-grid="finished" role="list"></div>
@@ -250,11 +231,6 @@
         </div>
       </div>
 
-      <!--
-        TABPANEL: ABANDONADA
-        ► v4: _injectExportButtons() inyecta aquí .vh-section-actions con el botón 📸
-              si hay al menos 1 VN en esta sección.
-      -->
       <div class="vh-tabpanel vh-tabpanel--hidden" id="tabpanel-dropped" role="tabpanel"
         aria-labelledby="tab-dropped" aria-live="polite" hidden>
         <div class="vh-cards-grid" data-panel-grid="dropped" role="list"></div>
@@ -269,7 +245,6 @@
 
   <!-- ═══════════════════════════════════════════════════════════════
        VISTA: FEED DE COMUNIDAD
-       Visible solo para usuarios autenticados con perfil público.
   ═══════════════════════════════════════════════════════════════ -->
   <main class="vh-view vh-view--hidden" id="viewFeed" data-view="feed" hidden>
     <div class="vh-container">
@@ -279,9 +254,29 @@
         <p class="vh-section-subtitle">Últimas reseñas de la comunidad</p>
       </section>
 
-      <div class="vh-feed" id="feedList" aria-live="polite">
-        <!-- Renderizado dinámico por feed-controller.js (próxima fase) -->
-      </div>
+      <div class="vh-feed" id="feedList" aria-live="polite"></div>
+
+    </div>
+  </main>
+
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       VISTA: PERFIL DE USUARIO
+       Visible para usuarios autenticados. También accesible via
+       URL con ?profile=UID para perfiles públicos de otros usuarios.
+  ═══════════════════════════════════════════════════════════════ -->
+  <main class="vh-view vh-view--hidden" id="viewProfile" data-view="profile" hidden>
+    <div class="vh-container">
+
+      <section class="vh-section-header">
+        <h2 class="vh-section-title">Perfil</h2>
+      </section>
+
+      <!--
+        profileContent: profile-controller.js inyecta aquí todo el contenido
+        dinámico (hero, stats, tabs, grid de VNs, reseñas, comparador de afinidad).
+      -->
+      <div id="profileContent" aria-live="polite"></div>
 
     </div>
   </main>
@@ -334,24 +329,12 @@
   </div>
 
 
-  <!--
-    SCRIPTS
-    Orden de carga (ES Modules — el navegador gestiona dependencias):
-    1. app-init.js       — bootstrap (LibraryStore + ThemeManager)
-    2. auth-controller   — Auth Firebase (depende del store ya inicializado)
-    3. render-engine     — funciones puras de DOM
-    4. ui-controller     — eventos y coordinación (v4: incluye exportación)
-    5. feed-controller   — feed de comunidad
-
-    NOTA v4:
-    export-engine.js y modal-export.js son importados internamente por
-    ui-controller.js vía ES Module imports — NO requieren <script> adicionales.
-  -->
   <script type="module" src="js/app-init.js"></script>
   <script type="module" src="js/auth-controller.js"></script>
   <script type="module" src="js/render-engine.js"></script>
   <script type="module" src="js/ui-controller.js"></script>
   <script type="module" src="js/feed-controller.js"></script>
+  <script type="module" src="js/profile-controller.js"></script>
 
 
 </body>

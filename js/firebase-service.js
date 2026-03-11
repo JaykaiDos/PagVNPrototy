@@ -10,6 +10,14 @@
  *  users/{uid}/meta/profile     → datos del perfil y privacidad
  *  users/{uid}/library/{vnId}   → entradas de biblioteca
  *  feed/{uid_vnId}              → reseñas públicas
+ *
+ * CAMBIOS v3:
+ *  - updateDisplayName(name) → Actualiza el nombre visible del usuario.
+ *
+ * CAMBIOS v2:
+ *  - getPublicProfile(uid)  → Lee el perfil de cualquier usuario por UID.
+ *  - getPublicLibrary(uid)  → Lee la biblioteca respetando privacidad.
+ *  - getPublicReviews(uid)  → Filtra entradas finished con review escrita.
  */
 
 import { initializeApp }
@@ -40,11 +48,11 @@ const _config = Object.freeze({
 });
 
 // ── Inicialización ───────────────────────────────────────────────────
-const _app      = initializeApp(_config);
+const _app       = initializeApp(_config);
 const _analytics = getAnalytics(_app);
-const _auth     = getAuth(_app);
-const _db       = getFirestore(_app);
-const _provider = new GoogleAuthProvider();
+const _auth      = getAuth(_app);
+const _db        = getFirestore(_app);
+const _provider  = new GoogleAuthProvider();
 _provider.setCustomParameters({ prompt: 'select_account' });
 
 // ── Estado interno ───────────────────────────────────────────────────
@@ -95,10 +103,10 @@ function isAuthenticated() {
   return _currentUser !== null;
 }
 
-/** Obtiene el ID token JWT del usuario actual (para integraciones). */
+/** Obtiene el ID token JWT del usuario actual. */
 async function getIdToken() {
   if (!_currentUser) return null;
-  return await _currentUser.getIdToken(/* forceRefresh */ false);
+  return await _currentUser.getIdToken(false);
 }
 
 // Helpers privados de auth
@@ -126,7 +134,7 @@ async function _ensureProfileExists(user) {
   }
 }
 
-// Listener global de auth — ejecuta una vez al cargar el módulo
+// Listener global de auth
 onAuthStateChanged(_auth, (user) => {
   _currentUser = user;
   const mapped = user ? _mapUser(user) : null;
@@ -167,11 +175,11 @@ async function resetPassword(email) {
 
 
 // ════════════════════════════════════════════════════════
-// 2. PERFIL
+// 2. PERFIL — PROPIO
 // ════════════════════════════════════════════════════════
 
 /**
- * Obtiene el perfil de un usuario.
+ * Obtiene el perfil del usuario autenticado actual.
  * @param {string|null} uid — default: usuario actual
  * @returns {Promise<object|null>}
  */
@@ -199,8 +207,91 @@ async function updatePrivacy(privacy) {
 }
 
 
+/**
+ * Actualiza el nombre visible del usuario en su perfil de Firestore.
+ * Validación: 2–40 caracteres, sin HTML.
+ *
+ * @param {string} displayName — Nuevo nombre del usuario
+ * @returns {Promise<void>}
+ */
+async function updateDisplayName(displayName) {
+  _assertAuth();
+  const name = String(displayName ?? '').trim();
+  if (name.length < 2 || name.length > 40) {
+    throw new RangeError('[Firebase] El nombre debe tener entre 2 y 40 caracteres.');
+  }
+  if (/<[^>]+>/.test(name)) {
+    throw new TypeError('[Firebase] El nombre contiene caracteres no permitidos.');
+  }
+  await setDoc(
+    doc(_db, 'users', _currentUser.uid, 'meta', 'profile'),
+    { displayName: name, updatedAt: serverTimestamp() },
+    { merge: true },
+  );
+}
+
+
 // ════════════════════════════════════════════════════════
-// 3. SINCRONIZACIÓN DE BIBLIOTECA
+// 3. PERFIL — PÚBLICO (cualquier usuario por UID)
+// ════════════════════════════════════════════════════════
+
+/**
+ * Obtiene el perfil de cualquier usuario por UID.
+ * No requiere autenticación. Devuelve null si no existe.
+ *
+ * DIFERENCIA con getUserProfile():
+ *  getUserProfile() usa el UID del usuario autenticado por defecto.
+ *  getPublicProfile() consulta el UID indicado sin restricción.
+ *
+ * @param {string} uid
+ * @returns {Promise<object|null>}
+ */
+async function getPublicProfile(uid) {
+  _validateUid(uid);
+  const snap = await getDoc(doc(_db, 'users', uid, 'meta', 'profile'));
+  return snap.exists() ? snap.data() : null;
+}
+
+/**
+ * Obtiene la biblioteca completa de un usuario.
+ * Verifica privacidad antes de devolver datos si no es el perfil propio.
+ *
+ * @param {string}  uid
+ * @param {boolean} isOwn — true si el solicitante es el dueño del perfil
+ * @returns {Promise<object[]>} Array de LibraryEntry o [] si es privado/no encontrado
+ */
+async function getPublicLibrary(uid, isOwn = false) {
+  _validateUid(uid);
+
+  if (!isOwn) {
+    const profile = await getPublicProfile(uid);
+    if (!profile || profile.privacy !== 'public') return [];
+  }
+
+  const snap = await getDocs(collection(_db, 'users', uid, 'library'));
+  return snap.docs.map(d => ({ ...d.data(), vnId: d.id }));
+}
+
+/**
+ * Devuelve solo las entradas con reseña escrita de la biblioteca de un usuario.
+ * Respeta la misma lógica de privacidad que getPublicLibrary().
+ *
+ * @param {string}  uid
+ * @param {boolean} isOwn
+ * @returns {Promise<object[]>}
+ */
+async function getPublicReviews(uid, isOwn = false) {
+  const entries = await getPublicLibrary(uid, isOwn);
+  return entries.filter(e =>
+    e.status === 'finished' &&
+    typeof e.review === 'string' &&
+    e.review.trim().length > 0
+  );
+}
+
+
+// ════════════════════════════════════════════════════════
+// 4. SINCRONIZACIÓN DE BIBLIOTECA
 // ════════════════════════════════════════════════════════
 
 /**
@@ -211,17 +302,17 @@ async function updatePrivacy(privacy) {
 async function saveLibraryEntry(vnId, entry) {
   _assertAuth();
   _validateVnId(vnId);
-  const ref = doc(_db, 'users', _currentUser.uid, 'library', vnId);
+  const ref  = doc(_db, 'users', _currentUser.uid, 'library', vnId);
   const data = {
-    vnId:       vnId,
-    status:     entry.status,
-    log:        entry.log ?? '',
-    comment:    entry.comment ?? '',
-    favRoute:   entry.favRoute ?? '',
-    review:     entry.review ?? '',
-    isSpoiler:  Boolean(entry.isSpoiler),
-    addedAt:    null,
-    updatedAt:  serverTimestamp(),    // Auditoría
+    vnId:      vnId,
+    status:    entry.status,
+    log:       entry.log       ?? '',
+    comment:   entry.comment   ?? '',
+    favRoute:  entry.favRoute  ?? '',
+    review:    entry.review    ?? '',
+    isSpoiler: Boolean(entry.isSpoiler),
+    addedAt:   null,
+    updatedAt: serverTimestamp(),
   };
   if (entry.score && typeof entry.score.finalScore === 'number') {
     data.score = entry.score;
@@ -253,7 +344,6 @@ async function loadLibraryFromCloud() {
 
 /**
  * Sube la biblioteca local completa a Firestore (batch atómico).
- * Usado cuando el usuario inicia sesión con datos locales existentes.
  * @param {object[]} entries
  * @returns {Promise<number>} Cantidad de entradas subidas
  */
@@ -261,24 +351,24 @@ async function uploadLibraryBatch(entries) {
   _assertAuth();
   if (!Array.isArray(entries) || entries.length === 0) return 0;
 
-  const CHUNK = 490; // Límite Firestore: 500 ops/batch
+  const CHUNK = 490;
   let uploaded = 0;
 
   for (let i = 0; i < entries.length; i += CHUNK) {
     const batch = writeBatch(_db);
     entries.slice(i, i + CHUNK).forEach(e => {
       if (!e?.vnId || !/^v\d+$/.test(e.vnId)) return;
-      const ref = doc(_db, 'users', _currentUser.uid, 'library', e.vnId);
+      const ref  = doc(_db, 'users', _currentUser.uid, 'library', e.vnId);
       const data = {
-        vnId:       e.vnId,
-        status:     e.status,
-        log:        e.log ?? '',
-        comment:    e.comment ?? '',
-        favRoute:   e.favRoute ?? '',
-        review:     e.review ?? '',
-        isSpoiler:  Boolean(e.isSpoiler),
-        addedAt:    null,
-        updatedAt:  serverTimestamp(),
+        vnId:      e.vnId,
+        status:    e.status,
+        log:       e.log       ?? '',
+        comment:   e.comment   ?? '',
+        favRoute:  e.favRoute  ?? '',
+        review:    e.review    ?? '',
+        isSpoiler: Boolean(e.isSpoiler),
+        addedAt:   null,
+        updatedAt: serverTimestamp(),
       };
       if (e.score && typeof e.score.finalScore === 'number') {
         data.score = e.score;
@@ -293,7 +383,7 @@ async function uploadLibraryBatch(entries) {
 
 
 // ════════════════════════════════════════════════════════
-// 4. FEED SOCIAL
+// 5. FEED SOCIAL
 // ════════════════════════════════════════════════════════
 
 /**
@@ -308,11 +398,16 @@ async function publishToFeed({ vnId, vnTitle, vnImageUrl, finalScore, scoreLabel
   const profile = await getUserProfile();
   if (profile?.privacy !== 'public') return null;
 
+  // Usar displayName del perfil Firestore (nombre personalizado),
+  // no el de Firebase Auth que refleja el nombre del proveedor de login.
+  const displayName = profile.displayName ?? _currentUser.displayName ?? 'Usuario';
+  const photoURL    = profile.photoURL    ?? _currentUser.photoURL    ?? '';
+
   const docId = `${_currentUser.uid}_${vnId}`;
   await setDoc(doc(_db, 'feed', docId), {
     uid:         _currentUser.uid,
-    displayName: _currentUser.displayName ?? 'Usuario',
-    photoURL:    _currentUser.photoURL    ?? '',
+    displayName,
+    photoURL,
     vnId,
     vnTitle:     String(vnTitle    ?? '').slice(0, 200),
     vnImageUrl:  /^https:\/\//i.test(vnImageUrl) ? vnImageUrl : '',
@@ -326,7 +421,7 @@ async function publishToFeed({ vnId, vnTitle, vnImageUrl, finalScore, scoreLabel
 }
 
 /**
- * Elimina la reseña del feed (ej: al cambiar privacidad o eliminar la VN).
+ * Elimina la reseña del feed.
  * @param {string} vnId
  */
 async function removeFromFeed(vnId) {
@@ -349,7 +444,18 @@ async function getPublicFeed(count = 20) {
 
 
 // ════════════════════════════════════════════════════════
-// 5. HELPERS PRIVADOS
+// 6. SINOPSIS EN ESPAÑOL (Firestore caché)
+// ════════════════════════════════════════════════════════
+
+async function getSpanishSynopsis(vnId) {
+  _validateVnId(vnId);
+  const snap = await getDoc(doc(_db, 'synopsis', vnId));
+  return snap.exists() ? snap.data() : null;
+}
+
+
+// ════════════════════════════════════════════════════════
+// 7. HELPERS PRIVADOS
 // ════════════════════════════════════════════════════════
 
 function _assertAuth() {
@@ -362,9 +468,15 @@ function _validateVnId(vnId) {
   }
 }
 
-/** Elimina valores undefined para que Firestore no los rechace. */
-function _clean(obj) {
-  return JSON.parse(JSON.stringify(obj, (_, v) => v === undefined ? null : v));
+/**
+ * Valida que el UID tenga formato Firebase válido.
+ * Previene consultas con rutas malformadas.
+ * @param {string} uid
+ */
+function _validateUid(uid) {
+  if (typeof uid !== 'string' || uid.trim().length < 8 || uid.trim().length > 128) {
+    throw new TypeError(`[Firebase] UID inválido: "${uid}"`);
+  }
 }
 
 
@@ -376,18 +488,14 @@ export {
   signInWithGoogle, signOutUser, onAuthChange, getCurrentUser, isAuthenticated,
   signUpWithEmailPassword, signInWithEmailPassword, getIdToken,
   resetPassword,
-  // Perfil
-  getUserProfile, updatePrivacy,
+  // Perfil propio
+  getUserProfile, updatePrivacy, updateDisplayName,
+  // Perfil público (cualquier usuario)
+  getPublicProfile, getPublicLibrary, getPublicReviews,
   // Biblioteca
   saveLibraryEntry, deleteLibraryEntry, loadLibraryFromCloud, uploadLibraryBatch,
   // Feed
   publishToFeed, removeFromFeed, getPublicFeed,
+  // Sinopsis
+  getSpanishSynopsis,
 };
-
-async function getSpanishSynopsis(vnId) {
-  _validateVnId(vnId);
-  const snap = await getDoc(doc(_db, 'synopsis', vnId));
-  return snap.exists() ? snap.data() : null;
-}
-
-export { getSpanishSynopsis };

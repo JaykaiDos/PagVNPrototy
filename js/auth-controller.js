@@ -6,6 +6,11 @@
  *              Maneja el botón de login/logout y el panel de perfil
  *              en el header. Reacciona a cambios de auth via onAuthChange().
  *
+ * CAMBIOS v2:
+ *  - _buildDropdown() incluye botón "Ver mi perfil" que dispara
+ *    el evento 'vnh:navigate' con view='profile' para abrir
+ *    el perfil propio sin acoplamiento directo a ui-controller.
+ *
  * RESPONSABILIDAD ÚNICA:
  *  - Renderizar el estado del usuario en el header.
  *  - Disparar signInWithGoogle() / signOutUser().
@@ -36,7 +41,6 @@ function _cacheDOM() {
 function _renderLoginButton() {
   if (!_dom.authContainer) return;
 
-  // Limpiamos contenido anterior
   while (_dom.authContainer.firstChild) {
     _dom.authContainer.removeChild(_dom.authContainer.firstChild);
   }
@@ -92,12 +96,10 @@ function _renderUserMenu(user) {
     _dom.authContainer.removeChild(_dom.authContainer.firstChild);
   }
 
-  // Wrapper del menú de usuario
   const wrapper = document.createElement('div');
   wrapper.className = 'vh-user-menu';
   wrapper.id        = 'userMenu';
 
-  // Botón disparador (avatar + nombre)
   const trigger = document.createElement('button');
   trigger.className   = 'vh-user-menu__trigger';
   trigger.setAttribute('aria-label', `Menú de usuario: ${user.displayName}`);
@@ -110,7 +112,6 @@ function _renderUserMenu(user) {
 
   if (user.photoURL) {
     const img    = document.createElement('img');
-    // Validamos que sea https para prevenir javascript: URIs
     const safeUrl = /^https:\/\//i.test(user.photoURL) ? user.photoURL : '';
     img.setAttribute('src',     safeUrl);
     img.setAttribute('alt',     user.displayName);
@@ -118,16 +119,13 @@ function _renderUserMenu(user) {
     img.onerror = () => { avatar.textContent = user.displayName.charAt(0).toUpperCase(); };
     avatar.appendChild(img);
   } else {
-    // Inicial como fallback
     avatar.textContent = user.displayName.charAt(0).toUpperCase();
   }
 
-  // Nombre (truncado si es largo)
   const name = document.createElement('span');
   name.className   = 'vh-user-menu__name';
   name.textContent = user.displayName.slice(0, 18) + (user.displayName.length > 18 ? '…' : '');
 
-  // Flecha indicadora
   const arrow = document.createElement('span');
   arrow.className      = 'vh-user-menu__arrow';
   arrow.setAttribute('aria-hidden', 'true');
@@ -137,18 +135,15 @@ function _renderUserMenu(user) {
   trigger.appendChild(name);
   trigger.appendChild(arrow);
 
-  // Dropdown
-  const dropdown = _buildDropdown(user);
+  const dropdown = _buildDropdown(user, trigger);
   dropdown.id    = 'userDropdown';
 
   wrapper.appendChild(trigger);
   wrapper.appendChild(dropdown);
   _dom.authContainer.appendChild(wrapper);
 
-  // Toggle dropdown al click
   trigger.addEventListener('click', () => _toggleDropdown(trigger, dropdown));
 
-  // Cerrar al click fuera
   document.addEventListener('click', (e) => {
     if (!wrapper.contains(e.target)) _closeDropdown(trigger, dropdown);
   }, { capture: true });
@@ -156,10 +151,13 @@ function _renderUserMenu(user) {
 
 /**
  * Construye el dropdown con opciones del usuario.
+ * Incluye botón "Ver mi perfil" que navega a la vista de perfil.
+ *
  * @param {{uid, displayName, email}} user
+ * @param {HTMLElement} trigger — necesario para cerrar el dropdown al navegar
  * @returns {HTMLElement}
  */
-function _buildDropdown(user) {
+function _buildDropdown(user, trigger) {
   const dropdown = document.createElement('div');
   dropdown.className = 'vh-user-menu__dropdown';
   dropdown.setAttribute('role',   'menu');
@@ -171,16 +169,39 @@ function _buildDropdown(user) {
   emailEl.textContent = user.email;
   dropdown.appendChild(emailEl);
 
-  // Separador
   dropdown.appendChild(_buildSeparator());
 
-  // Selector de privacidad
+  // ── Botón "Ver mi perfil" ──────────────────────────────────────
+  const profileBtn = document.createElement('button');
+  profileBtn.className   = 'vh-user-menu__item';
+  profileBtn.setAttribute('role', 'menuitem');
+
+  const profileIcon = document.createElement('span');
+  profileIcon.setAttribute('aria-hidden', 'true');
+  profileIcon.textContent = '👤';
+
+  const profileLabel = document.createElement('span');
+  profileLabel.textContent = 'Ver mi perfil';
+
+  profileBtn.appendChild(profileIcon);
+  profileBtn.appendChild(profileLabel);
+
+  profileBtn.addEventListener('click', () => {
+    _closeDropdown(trigger, dropdown);
+    // Notificar a ui-controller para navegar al perfil propio
+    document.dispatchEvent(
+      new CustomEvent('vnh:navigate', { detail: { view: 'profile', uid: null } })
+    );
+  });
+
+  dropdown.appendChild(profileBtn);
+  dropdown.appendChild(_buildSeparator());
+
+  // ── Selector de privacidad ────────────────────────────────────
   dropdown.appendChild(_buildPrivacySelector());
-
-  // Separador
   dropdown.appendChild(_buildSeparator());
 
-  // Botón cerrar sesión
+  // ── Botón cerrar sesión ───────────────────────────────────────
   const logoutBtn = document.createElement('button');
   logoutBtn.className   = 'vh-user-menu__item vh-user-menu__item--danger';
   logoutBtn.setAttribute('role', 'menuitem');
@@ -214,9 +235,9 @@ function _buildPrivacySelector() {
   wrapper.appendChild(label);
 
   const options = [
-    { value: 'public',  icon: '🌐', text: 'Público'       },
-    { value: 'friends', icon: '👥', text: 'Solo amigos'   },
-    { value: 'private', icon: '🔒', text: 'Privado'       },
+    { value: 'public',  icon: '🌐', text: 'Público'     },
+    { value: 'friends', icon: '👥', text: 'Solo amigos' },
+    { value: 'private', icon: '🔒', text: 'Privado'     },
   ];
 
   const btnGroup = document.createElement('div');
@@ -244,7 +265,6 @@ function _buildPrivacySelector() {
 
   wrapper.appendChild(btnGroup);
 
-  // Cargamos la privacidad actual y marcamos el botón activo
   FirebaseService.getUserProfile().then(profile => {
     if (!profile) return;
     _markActivePrivacy(btnGroup, profile.privacy);
@@ -264,10 +284,6 @@ function _buildSeparator() {
 // 2. HANDLERS DE EVENTOS
 // ════════════════════════════════════════════════════════
 
-/**
- * Maneja el click en "Iniciar sesión".
- * Tras login, sincroniza biblioteca local → Firestore.
- */
 async function _handleLogin() {
   try {
     await FirebaseService.signInWithGoogle();
@@ -341,7 +357,7 @@ async function _handlePasswordReset() {
     console.error('[AuthController] Reset password error:', err);
   }
 }
-/** Maneja el click en "Cerrar sesión". */
+
 async function _handleLogout() {
   try {
     await FirebaseService.signOutUser();
@@ -409,44 +425,25 @@ function _closeDropdown(trigger, dropdown) {
 
 /**
  * Al iniciar sesión, sincroniza la biblioteca local con Firestore.
- *
- * ESTRATEGIA: Firestore tiene prioridad (source of truth en la nube).
- *
- * CORRECCIÓN BUG «Score/review perdido tras login»:
- *   Antes se usaba LibraryStore.addVn(entry.vnId, entry.status), que crea
- *   una entrada con todos los campos en valores por defecto, descartando
- *   el score, la review, el log y el resto de campos guardados en Firestore.
- *
- *   Ahora se usa LibraryStore.addVn() solo para registrar la entrada con su
- *   estado correcto, y luego se restauran los campos avanzados (score, review,
- *   favRoute, isSpoiler, log, comment) con las funciones de actualización
- *   específicas de cada estado.
- *
- * @param {string} uid - UID del usuario autenticado.
+ * Firestore tiene prioridad (source of truth en la nube).
+ * @param {string} uid
  */
 async function _syncLibraryOnLogin(uid) {
   try {
-    // 1. Subir entradas locales que aún no están en Firestore
     const localEntries = LibraryStore.getEntriesByStatus(null);
     if (localEntries.length > 0) {
       const uploaded = await FirebaseService.uploadLibraryBatch(localEntries);
       console.info(`[AuthController] ${uploaded} entradas locales subidas a Firestore para ${uid}.`);
     }
 
-    // 2. Cargar la biblioteca completa desde la nube
     const cloudEntries = await FirebaseService.loadLibraryFromCloud();
-
-    // 3. Limpiar el store local antes de repoblarlo
     LibraryStore.clearAll();
 
-    // 4. Restaurar CADA entrada con TODOS sus campos (no solo status)
     cloudEntries.forEach(entry => {
       if (!entry?.vnId || !entry?.status) return;
 
-      // 4a. Crear la entrada base con el estado correcto
       LibraryStore.addVn(entry.vnId, entry.status);
 
-      // 4b. Restaurar campos específicos de FINISHED (score, review, favRoute)
       if (entry.status === 'finished' && entry.score?.finalScore != null) {
         try {
           LibraryStore.updateReview(entry.vnId, entry.score, {
@@ -459,7 +456,6 @@ async function _syncLibraryOnLogin(uid) {
         }
       }
 
-      // 4c. Restaurar bitácora de PLAYING (log)
       if (entry.status === 'playing' && entry.log) {
         try {
           LibraryStore.updateLog(entry.vnId, entry.log);
@@ -468,7 +464,6 @@ async function _syncLibraryOnLogin(uid) {
         }
       }
 
-      // 4d. Restaurar comentario de DROPPED (comment)
       if (entry.status === 'dropped' && entry.comment) {
         try {
           LibraryStore.updateComment(entry.vnId, entry.comment);
@@ -492,17 +487,26 @@ async function _syncLibraryOnLogin(uid) {
 
 /**
  * Reacciona a los cambios de estado de autenticación.
- * Llamado por onAuthChange() de firebase-service.
- *
  * @param {{uid,displayName,photoURL,email}|null} user
  */
 async function _onAuthChange(user) {
   if (user) {
     _renderUserMenu(user);
     await _syncLibraryOnLogin(user.uid);
+
+    // Notificar a ui-controller para mostrar tabs protegidos
+    try {
+      const { setFeedTabVisible } = await import('./ui-controller.js');
+      setFeedTabVisible(true);
+    } catch {}
+
   } else {
     _renderLoginButton();
-    try { LibraryStore.clearAll(); } catch {}
+    try {
+      LibraryStore.clearAll();
+      const { setFeedTabVisible } = await import('./ui-controller.js');
+      setFeedTabVisible(false);
+    } catch {}
   }
 }
 
@@ -511,10 +515,6 @@ async function _onAuthChange(user) {
 // 6. INICIALIZACIÓN
 // ════════════════════════════════════════════════════════
 
-/**
- * Inicializa el controlador de autenticación.
- * Llamado desde app-init.js tras el bootstrap principal.
- */
 function init() {
   _cacheDOM();
 
@@ -523,9 +523,7 @@ function init() {
     return;
   }
 
-  // Suscribirse a cambios de auth — se ejecuta inmediatamente con el estado actual
   FirebaseService.onAuthChange(_onAuthChange);
-
   console.info('[AuthController] Inicializado ✓');
 }
 

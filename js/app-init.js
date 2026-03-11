@@ -17,6 +17,7 @@
  *  - Cada módulo falla de forma aislada (no bloquea los demás).
  */
 
+import * as ProfileController from './profile-controller.js';
 import * as FeedController from './feed-controller.js';
 import * as LibraryStore    from './library-store.js';
 import * as AuthController  from './auth-controller.js';
@@ -168,7 +169,14 @@ try {
   console.error('[VN-Hub] Error al inicializar FeedController:', err);
 }
 
-  // ── 6. Log de debug en desarrollo
+// ── 6. Profile Controller
+try {
+  ProfileController.init();
+} catch (err) {
+  console.error('[VN-Hub] Error al inicializar ProfileController:', err);
+}
+
+  // ── 7. Log de debug en desarrollo
   if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
     LibraryStore.subscribe((event, payload) => {
       console.debug(`[LibraryStore] ${event}:`, payload?.vnId ?? payload);

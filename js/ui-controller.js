@@ -3,39 +3,28 @@
 /**
  * @file js/ui-controller.js
  * @description Controlador principal de la UI de VN-Hub.
- *              Versión 4: integración del sistema de exportación PNG por sección.
+ *              Versión 5: integración del Módulo de Perfil de Usuario.
  *
- * CAMBIOS v4:
- *  - Import de ModalExport (modal-export.js).
- *  - _renderLibrary() llama a _injectExportButtons() al finalizar el render.
- *  - _injectExportButtons(): inyecta/actualiza el botón "Exportar" en cada
- *    tabpanel de estado (pending, playing, finished, dropped).
- *  - _buildExportButton(): construye el <button> de exportación (SRP).
- *  - _onExportButtonClick(): handler centralizado para todos los botones export.
- *  - _openExportModal(): recopila datos y delega en ModalExport.open().
- *
- * CAMBIOS v3:
- *  - _confirmAndRemove() delega al nuevo módulo ModalDelete.
- *  - Se agrega _executeRemove() por SRP (UI vs. lógica de datos).
- *  - Import de modal-delete.js.
- *
- * CAMBIOS v2:
- *  - _applyStatusSelection() abre el modal correspondiente
- *    según el nuevo estado seleccionado.
- *  - Se importan los tres módulos de modales.
+ * CAMBIOS v5:
+ *  - _cacheDOM() incluye viewProfile, navProfile, navProfileItem.
+ *  - _switchView() soporta la vista 'profile' con guard de auth.
+ *  - setFeedTabVisible() también controla la visibilidad de navProfileItem.
+ *  - _bindEvents() registra el click de navProfile y el evento 'vnh:navigate'.
+ *  - Al navegar a 'profile' se llama a ProfileController.openProfile().
  */
 
-import * as VndbService   from './vndb-service.js';
-import * as LibraryStore  from './library-store.js';
-import * as RenderEngine  from './render-engine.js';
-import * as ModalReview   from './modal-review.js';
-import * as ModalLog      from './modal-log.js';
-import * as ModalComment  from './modal-comment.js';
-import * as ModalDelete   from './modal-delete.js';
-import { ModalExport }    from './modal-export.js';
+import * as VndbService      from './vndb-service.js';
+import * as LibraryStore     from './library-store.js';
+import * as RenderEngine     from './render-engine.js';
+import * as ModalReview      from './modal-review.js';
+import * as ModalLog         from './modal-log.js';
+import * as ModalComment     from './modal-comment.js';
+import * as ModalDelete      from './modal-delete.js';
+import * as ProfileController from './profile-controller.js';
+import { ModalExport }       from './modal-export.js';
 import { VN_STATUS, VN_STATUS_META, TOAST_DURATION_MS } from './constants.js';
-import { ThemeManager }   from './app-init.js';
-import * as FirebaseService from './firebase-service.js';
+import { ThemeManager }      from './app-init.js';
+import * as FirebaseService  from './firebase-service.js';
 
 
 // ─────────────────────────────────────────────
@@ -68,8 +57,9 @@ function _cacheDOM() {
   const ids = [
     'searchInput', 'searchClear', 'searchState', 'searchResults',
     'searchPagination', 'prevPage', 'nextPage', 'pageInfo',
-    'viewSearch', 'viewLibrary', 'viewFeed',
+    'viewSearch', 'viewLibrary', 'viewFeed', 'viewProfile',
     'navSearch', 'navLibrary', 'navFeed', 'navFeedItem',
+    'navProfile', 'navProfileItem',
     'statusMenu', 'menuOverlay',
     'toast', 'themeToggle', 'libraryStats',
   ];
@@ -107,17 +97,20 @@ function _cacheDOM() {
 
 function _switchView(viewName) {
   if (viewName === _state.view) return;
-  // Guard de autenticación para Biblioteca
-  if (viewName === 'library') {
+
+  // Guard de autenticación para Biblioteca y Perfil
+  if (viewName === 'library' || viewName === 'profile') {
     const isAuthed = FirebaseService.isAuthenticated();
     if (!isAuthed) {
-      _showToast('Acceso restringido. Inicia sesión para ver tu biblioteca.', 'info');
+      _showToast('Acceso restringido. Inicia sesión para continuar.', 'info');
       viewName = 'search';
     }
   }
+
   _state.view = viewName;
 
-  ['search', 'library', 'feed'].forEach(v => {
+  // Mostrar/ocultar vistas
+  ['search', 'library', 'feed', 'profile'].forEach(v => {
     const el = document.getElementById(`view${_capitalize(v)}`);
     if (!el) return;
     const isActive = v === viewName;
@@ -125,7 +118,8 @@ function _switchView(viewName) {
     el.classList.toggle('vh-view--hidden', !isActive);
   });
 
-  ['navSearch', 'navLibrary', 'navFeed'].forEach(id => {
+  // Marcar nav activo
+  ['navSearch', 'navLibrary', 'navFeed', 'navProfile'].forEach(id => {
     const btn = _dom[id];
     if (!btn) return;
     const isActive = btn.dataset.view === viewName;
@@ -134,6 +128,7 @@ function _switchView(viewName) {
   });
 
   if (viewName === 'library') _renderLibrary();
+  if (viewName === 'profile') ProfileController.openProfile(null);
 }
 
 function _capitalize(str) {
@@ -141,12 +136,13 @@ function _capitalize(str) {
 }
 
 /**
- * Muestra u oculta el tab de Comunidad según el estado de auth.
+ * Muestra u oculta los tabs de Comunidad y Perfil según el estado de auth.
  * Llamado desde auth-controller cuando cambia la sesión.
  * @param {boolean} isAuthenticated
  */
 function setFeedTabVisible(isAuthenticated) {
-  if (_dom.navFeedItem) _dom.navFeedItem.hidden = !isAuthenticated;
+  if (_dom.navFeedItem)    _dom.navFeedItem.hidden    = !isAuthenticated;
+  if (_dom.navProfileItem) _dom.navProfileItem.hidden = !isAuthenticated;
 }
 
 
@@ -296,16 +292,6 @@ function _activateTab(tabStatus) {
 /**
  * Renderiza todos los paneles de la biblioteca e inyecta los botones
  * de exportación en cada sección de estado.
- *
- * CORRECCIÓN BUG «Finalizado vacío»:
- *   El panel 'finished' usa getEntriesByStatus(VN_STATUS.FINISHED)
- *   en lugar de getRankedFinished(). Motivo: getRankedFinished() filtra
- *   exclusivamente entradas con score !== null, por lo que VNs marcadas
- *   como "Finalizado" sin review completa desaparecían del panel.
- *   getEntriesByStatus muestra TODAS las finalizadas; las que tienen score
- *   aparecen con ranking, las que no con badge de «pendiente de reseña».
- *
- * CAMBIOS v4: Agrega llamada a _injectExportButtons(stats) al final.
  */
 function _renderLibrary() {
   const stats = LibraryStore.getStats();
@@ -315,11 +301,9 @@ function _renderLibrary() {
   _renderPanel('all',      LibraryStore.getEntriesByStatus(null));
   _renderPanel('pending',  LibraryStore.getEntriesByStatus(VN_STATUS.PENDING));
   _renderPanel('playing',  LibraryStore.getEntriesByStatus(VN_STATUS.PLAYING));
-  // ► Corrección: todas las finalizadas, con o sin score calculado
   _renderPanel('finished', LibraryStore.getEntriesByStatus(VN_STATUS.FINISHED));
   _renderPanel('dropped',  LibraryStore.getEntriesByStatus(VN_STATUS.DROPPED));
 
-  // ► v4: Inyectar/actualizar botones de exportación en cada sección de estado
   _injectExportButtons(stats);
 }
 
@@ -347,7 +331,6 @@ async function _renderPanel(panelId, entries) {
       vnList.forEach(vn => _state.vnCache.set(vn.id, vn));
     } catch (err) {
       console.warn('[UI] No se pudieron cargar metadatos:', err);
-      // Fallback: intentar snapshots locales para cada ID
       uncachedIds.forEach(id => {
         const snap = VndbService.getLocalMetaSnapshot?.(id);
         if (snap) _state.vnCache.set(id, snap);
@@ -371,22 +354,13 @@ async function _renderPanel(panelId, entries) {
 
 
 // ─────────────────────────────────────────────
-// 5b. SISTEMA DE EXPORTACIÓN PNG
-//     Funciones añadidas en v4.
-//     SRP: cada función tiene una sola responsabilidad.
+// 5b. SISTEMA DE EXPORTACIÓN PNG (v4)
 // ─────────────────────────────────────────────
 
 /**
- * Inyecta (o actualiza) el botón "Exportar como imagen" en cada tabpanel
- * de estado que tenga al menos una VN. Oculta el botón si la sección está vacía.
- *
- * ESTRATEGIA DE REUTILIZACIÓN:
- *  El contenedor `.vh-section-actions[data-export-container]` y el botón
- *  se crean UNA SOLA VEZ y se reutilizan en renders posteriores para
- *  evitar memory leaks y acumulación de event listeners.
- *
+ * Inyecta el botón "Exportar como imagen" en cada tabpanel de estado
+ * que tenga al menos una VN.
  * @param {{ total: number, byStatus: Record<string, number> }} stats
- *   Estadísticas actuales de la biblioteca.
  */
 function _injectExportButtons(stats) {
   const EXPORT_STATUSES = [
@@ -403,7 +377,6 @@ function _injectExportButtons(stats) {
 
     const count = stats.byStatus[status] ?? 0;
 
-    // Buscar o crear el contenedor de acciones (creado solo una vez por panel)
     let actionsContainer = panel.querySelector(
       `.vh-section-actions[data-export-container="${status}"]`
     );
@@ -416,18 +389,15 @@ function _injectExportButtons(stats) {
         'aria-label',
         `Acciones de la sección ${VN_STATUS_META[status].label}`,
       );
-      // Insertar al inicio del tabpanel (antes del grid y del empty state)
       panel.insertBefore(actionsContainer, panel.firstChild);
     }
 
-    // Buscar o crear el botón dentro del contenedor (creado solo una vez)
     let exportBtn = actionsContainer.querySelector('[data-export-btn]');
     if (!exportBtn) {
       exportBtn = _buildExportButton(status);
       actionsContainer.appendChild(exportBtn);
     }
 
-    // Mostrar u ocultar el contenedor según disponibilidad de entradas
     const hasEntries = count > 0;
     actionsContainer.hidden = !hasEntries;
 
@@ -442,11 +412,8 @@ function _injectExportButtons(stats) {
 }
 
 /**
- * Construye el elemento <button> de exportación para una sección de estado.
- * Registra el listener UNA SOLA VEZ (no closures en el handler para
- * facilitar garbage collection).
- *
- * @param {string} status - Estado de la sección (VN_STATUS).
+ * Construye el <button> de exportación para una sección de estado.
+ * @param {string} status
  * @returns {HTMLButtonElement}
  */
 function _buildExportButton(status) {
@@ -455,27 +422,20 @@ function _buildExportButton(status) {
   const btn = document.createElement('button');
   btn.type      = 'button';
   btn.className = 'vh-btn-export';
-  btn.setAttribute(
-    'title',
-    `Exportar la sección "${meta.label}" como imagen PNG compartible`,
-  );
+  btn.setAttribute('title', `Exportar la sección "${meta.label}" como imagen PNG compartible`);
   btn.dataset.exportBtn    = status;
   btn.dataset.exportStatus = status;
 
-  // Icono de cámara
   const iconSpan = document.createElement('span');
   iconSpan.className = 'vh-btn-export__icon';
   iconSpan.setAttribute('aria-hidden', 'true');
   iconSpan.textContent = '📸';
 
-  // Etiqueta
   const labelSpan = document.createElement('span');
   labelSpan.textContent = 'Exportar lista';
 
   btn.appendChild(iconSpan);
   btn.appendChild(labelSpan);
-
-  // Handler referenciado (no función anónima) para facilitar gestión de memoria
   btn.addEventListener('click', _onExportButtonClick);
 
   return btn;
@@ -483,11 +443,6 @@ function _buildExportButton(status) {
 
 /**
  * Handler centralizado para todos los botones de exportación.
- * Lee el estado desde el data-attribute del botón y delega en _openExportModal().
- *
- * SEGURIDAD: Valida el status antes de procesar para evitar valores
- * arbitrarios inyectados en data-attributes.
- *
  * @param {MouseEvent} e
  */
 function _onExportButtonClick(e) {
@@ -503,39 +458,21 @@ function _onExportButtonClick(e) {
 }
 
 /**
- * Recopila los datos necesarios para la exportación y abre el modal.
- *
- * DATOS RECOPILADOS:
- *  - entries: lista de LibraryEntries del estado solicitado.
- *  - vnCache: caché de metadatos VNDB (portadas, títulos, ratings).
- *  - theme:   tema activo del documento ('light' | 'dark').
- *
- * MANEJO DE ERRORES:
- *  - Sección vacía → toast informativo (no abre el modal).
- *  - Error inesperado de ModalExport → toast de error.
- *
- * @param {string} status - Estado de la sección (VN_STATUS).
+ * Recopila datos y abre el modal de exportación.
+ * @param {string} status
  */
 function _openExportModal(status) {
   const entries = LibraryStore.getEntriesByStatus(status);
 
   if (entries.length === 0) {
-    _showToast(
-      `No hay novelas en "${VN_STATUS_META[status].label}" para exportar.`,
-      'info',
-    );
+    _showToast(`No hay novelas en "${VN_STATUS_META[status].label}" para exportar.`, 'info');
     return;
   }
 
   const theme = document.documentElement.dataset.theme ?? 'light';
 
   try {
-    ModalExport.open({
-      status,
-      entries,
-      vnCache: _state.vnCache,
-      theme,
-    });
+    ModalExport.open({ status, entries, vnCache: _state.vnCache, theme });
   } catch (error) {
     console.error('[UI] Error al abrir modal de exportación:', error);
     _showToast('Error al preparar la exportación. Intenta nuevamente.', 'error');
@@ -559,15 +496,7 @@ function _closeStatusMenu() {
 
 /**
  * Aplica el estado seleccionado en el menú flotante.
- * MODIFICADO v2: abre el modal correspondiente según el nuevo estado.
- *
- * REGLAS DE MODAL:
- *  - FINISHED → ModalReview.open()  (formulario de puntuación)
- *  - PLAYING  → ModalLog.open()     (bitácora, solo si ya estaba en otro estado)
- *  - DROPPED  → ModalComment.open() (comentario de abandono)
- *  - PENDING  → sin modal
- *
- * @param {string} status - Nuevo estado seleccionado.
+ * @param {string} status
  */
 function _applyStatusSelection(status) {
   const vnId = _state.menuTargetVnId;
@@ -582,28 +511,21 @@ function _applyStatusSelection(status) {
   const vnImageUrl    = vnEntry?.imageUrl ?? '';
 
   if (!existingEntry) {
-    // Nueva entrada en la biblioteca
     LibraryStore.addVn(vnId, status);
     _showToast(`${meta.icon} Añadida como "${meta.label}"`, 'success');
   } else if (existingEntry.status !== status) {
-    // Cambio de estado
     const oldMeta = VN_STATUS_META[existingEntry.status];
     LibraryStore.updateStatus(vnId, status);
     _showToast(`${meta.icon} Movida de "${oldMeta.label}" → "${meta.label}"`, 'info');
-  } else {
-    // Mismo estado: solo abrimos el modal si aplica (para editar)
   }
 
-  // Abrir modal según el nuevo estado
   _openModalForStatus(status, vnId, vnTitle, vnImageUrl);
 
-  // Refrescar la card en el buscador si estamos en esa vista
   if (_state.view === 'search') _refreshSearchCard(vnId);
 }
 
 /**
  * Abre el modal correspondiente al estado seleccionado.
- *
  * @param {string} status
  * @param {string} vnId
  * @param {string} vnTitle
@@ -614,18 +536,14 @@ function _openModalForStatus(status, vnId, vnTitle, vnImageUrl) {
     case VN_STATUS.FINISHED:
       ModalReview.open(vnId, vnTitle, vnImageUrl);
       break;
-
     case VN_STATUS.PLAYING:
       ModalLog.open(vnId, vnTitle);
       break;
-
     case VN_STATUS.DROPPED:
       ModalComment.open(vnId, vnTitle);
       break;
-
     case VN_STATUS.PENDING:
     default:
-      // Sin modal para Pendiente
       break;
   }
 }
@@ -731,193 +649,8 @@ function _showToast(message, type = 'info') {
 
 
 // ─────────────────────────────────────────────
-// 9. REGISTRO DE EVENTOS
+// 9. MODAL DE SELECCIÓN DE ESTADO
 // ─────────────────────────────────────────────
-
-function _bindEvents() {
-
-  // Toggle tema
-  _dom.themeToggle?.addEventListener('click', () => ThemeManager.toggle());
-
-  // Navegación principal
-  ['navSearch', 'navLibrary', 'navFeed'].forEach(id => {
-    _dom[id]?.addEventListener('click', (e) => {
-      _switchView(e.currentTarget.dataset.view);
-    });
-  });
-
-  // Buscador
-  _dom.searchInput?.addEventListener('input', _onSearchInput);
-  _dom.searchInput?.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      clearTimeout(_searchDebounceTimer);
-      const query = e.target.value.trim();
-      if (query.length >= 2) {
-        _setSearchState('loading');
-        _executeSearch(query, 1);
-      }
-    }
-  });
-
-  // Limpiar búsqueda
-  _dom.searchClear?.addEventListener('click', () => {
-    if (_dom.searchInput) _dom.searchInput.value = '';
-    _dom.searchClear.hidden = true;
-    _setSearchState('idle');
-    _clearSearchResults();
-  });
-
-  // Paginación
-  _dom.prevPage?.addEventListener('click', () => {
-    if (_state.searchPage > 1) _executeSearch(_state.searchQuery, _state.searchPage - 1);
-  });
-  _dom.nextPage?.addEventListener('click', () => {
-    if (_state.searchHasMore) _executeSearch(_state.searchQuery, _state.searchPage + 1);
-  });
-
-  // Pestañas
-  document.querySelector('.vh-tabs')?.addEventListener('click', (e) => {
-    const btn = e.target.closest('[role="tab"]');
-    if (btn) _activateTab(btn.dataset.status);
-  });
-
-  document.querySelector('.vh-tabs')?.addEventListener('keydown', (e) => {
-    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-    const tabs    = [...document.querySelectorAll('[role="tab"]')];
-    const idx     = tabs.indexOf(document.activeElement);
-    if (idx === -1) return;
-    const nextIdx = e.key === 'ArrowRight'
-      ? (idx + 1) % tabs.length
-      : (idx - 1 + tabs.length) % tabs.length;
-    tabs[nextIdx].focus();
-    tabs[nextIdx].click();
-    e.preventDefault();
-  });
-
-  // Grid de búsqueda
-  _dom.searchResults?.addEventListener('click', _handleGridClick);
-
-  // Paneles de biblioteca
-  document.getElementById('viewLibrary')?.addEventListener('click', _handleLibraryClick);
-
-  // Menú flotante
-  _dom.statusMenu?.addEventListener('click', (e) => {
-    const btn = e.target.closest('[role="menuitem"][data-status]');
-    if (btn) _applyStatusSelection(btn.dataset.status);
-  });
-
-  _dom.statusMenu?.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') _closeStatusMenu();
-  });
-
-  _dom.menuOverlay?.addEventListener('click', _closeStatusMenu);
-
-  // Botón "ir a búsqueda" desde estados vacíos
-  document.addEventListener('click', (e) => {
-    if (e.target.closest('[data-go-search]')) {
-      _switchView('search');
-      _dom.searchInput?.focus();
-    }
-  });
-  window.addEventListener('resize', () => {
-    if (!_dom.statusMenu || _dom.statusMenu.hidden) return;
-    _closeStatusMenu();
-  });
-  window.addEventListener('scroll', () => {
-    if (!_dom.statusMenu || _dom.statusMenu.hidden) return;
-    _closeStatusMenu();
-  }, { passive: true });
-}
-
-function _handleGridClick(e) {
-  const btn = e.target.closest('[data-action][data-vn-id]');
-  if (!btn) return;
-  if (btn.dataset.action === 'open-status-menu') {
-    _openStatusMenu(btn.dataset.vnId, btn);
-  }
-}
-
-function _handleLibraryClick(e) {
-  const btn = e.target.closest('[data-action][data-vn-id]');
-  if (!btn) return;
-
-  const { action, vnId } = btn.dataset;
-
-  switch (action) {
-    case 'open-status-menu':
-      _openStatusMenu(vnId, btn);
-      break;
-    case 'remove-vn':
-      _confirmAndRemove(vnId);
-      break;
-    case 'edit-log':
-      // Botón de editar bitácora desde la card de biblioteca
-      _openModalForStatus(VN_STATUS.PLAYING, vnId,
-        _state.vnCache.get(vnId)?.title ?? vnId, '');
-      break;
-    case 'edit-review':
-      // Botón de editar review desde la card de biblioteca
-      _openModalForStatus(VN_STATUS.FINISHED, vnId,
-        _state.vnCache.get(vnId)?.title   ?? vnId,
-        _state.vnCache.get(vnId)?.imageUrl ?? '');
-      break;
-    case 'edit-comment':
-      // Botón de editar comentario desde la card de biblioteca
-      _openModalForStatus(VN_STATUS.DROPPED, vnId,
-        _state.vnCache.get(vnId)?.title ?? vnId, '');
-      break;
-  }
-}
-
-/**
- * Solicita confirmación al usuario mediante el modal glassmorphism
- * y elimina la VN de la biblioteca si el usuario confirma.
- *
- * FLUJO DE ELIMINACIÓN (v3):
- *  1. ModalDelete.open() muestra el diálogo de confirmación.
- *  2. Si confirma → _executeRemove(vnId).
- *  3. LibraryStore.removeVn(vnId) persiste en localStorage y
- *     emite evento 'remove' con payload { vnId }.
- *  4. FirebaseSync (app-init.js) intercepta 'remove' vía Observer
- *     y llama a deleteLibraryEntry + removeFromFeed en Firestore.
- *  5. Toast de confirmación al usuario.
- *
- * NOTA: La sincronización con Firestore la gestiona FirebaseSync de
- * forma desacoplada. Si Firestore falla, el error queda logueado en
- * consola pero NO bloquea la UI (estado local ya actualizado).
- *
- * @param {string} vnId - ID de VNDB de la novela a eliminar.
- */
-function _confirmAndRemove(vnId) {
-  const vnEntry = _state.vnCache.get(vnId);
-  const title   = vnEntry?.title    ?? vnId;
-  const imgUrl  = vnEntry?.imageUrl ?? '';
-
-  // Delega la UI de confirmación a ModalDelete (SRP: controlador de UI)
-  ModalDelete.open(vnId, title, imgUrl, () => _executeRemove(vnId));
-}
-
-/**
- * Ejecuta la eliminación real de la VN tras la confirmación del usuario.
- * Separado de _confirmAndRemove por el principio de Responsabilidad Única:
- * _confirmAndRemove gestiona el flujo UI; _executeRemove gestiona los datos.
- *
- * NOTA: La sincronización Firestore ocurre automáticamente vía el Observer
- * de LibraryStore → FirebaseSync en app-init.js.
- *
- * @param {string} vnId - ID de VNDB de la novela a eliminar.
- */
-function _executeRemove(vnId) {
-  const title      = _state.vnCache.get(vnId)?.title ?? vnId;
-  const wasRemoved = LibraryStore.removeVn(vnId);
-
-  if (wasRemoved) {
-    _showToast(`"${title}" eliminada de la biblioteca`, 'success');
-  } else {
-    // Caso borde: doble-click rápido / entrada ya inexistente
-    console.warn(`[UI] removeVn("${vnId}") devolvió false — entrada no encontrada.`);
-  }
-}
 
 function _openStatusModal(vnId) {
   _state.menuTargetVnId = vnId;
@@ -958,20 +691,20 @@ function _openStatusModal(vnId) {
     list.setAttribute('role', 'menu');
 
     const options = [
-      ['pending','📌','Pendiente'],
-      ['playing','🎮','Jugando'],
-      ['finished','🏆','Finalizado'],
-      ['dropped','❌','Abandonada'],
+      ['pending',  '📌', 'Pendiente' ],
+      ['playing',  '🎮', 'Jugando'   ],
+      ['finished', '🏆', 'Finalizado'],
+      ['dropped',  '❌', 'Abandonada'],
     ];
     options.forEach(([status, icon, label]) => {
       const li = document.createElement('li');
-      li.setAttribute('role','none');
+      li.setAttribute('role', 'none');
       const btn = document.createElement('button');
       btn.className = `vh-status-menu__option vh-status-menu__option--${status}`;
-      btn.setAttribute('role','menuitem');
+      btn.setAttribute('role', 'menuitem');
       btn.dataset.status = status;
       const i = document.createElement('span');
-      i.setAttribute('aria-hidden','true');
+      i.setAttribute('aria-hidden', 'true');
       i.textContent = icon;
       const s = document.createElement('span');
       s.textContent = label;
@@ -996,11 +729,8 @@ function _openStatusModal(vnId) {
     modal.appendChild(footer);
     overlay.appendChild(modal);
 
-    // Cerrar al click fuera
     overlay.addEventListener('click', _closeStatusModal);
 
-    // Cerrar con Escape — registrado una sola vez en document para evitar
-    // acumulación de listeners si el modal se recrea en futuros ciclos de vida.
     if (!overlay.dataset.escBound) {
       document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape' && !overlay.hidden) _closeStatusModal();
@@ -1009,7 +739,6 @@ function _openStatusModal(vnId) {
     }
   }
 
-  // Si el modal existe pero no está dentro del overlay, moverlo
   if (modal.parentElement !== overlay) {
     overlay.appendChild(modal);
   }
@@ -1059,20 +788,20 @@ function _ensureStatusMenu() {
   list.className = 'vh-status-menu__list';
   list.setAttribute('role', 'none');
   const options = [
-    ['pending','📌','Pendiente'],
-    ['playing','🎮','Jugando'],
-    ['finished','🏆','Finalizado'],
-    ['dropped','❌','Abandonada'],
+    ['pending',  '📌', 'Pendiente' ],
+    ['playing',  '🎮', 'Jugando'   ],
+    ['finished', '🏆', 'Finalizado'],
+    ['dropped',  '❌', 'Abandonada'],
   ];
   options.forEach(([status, icon, label]) => {
     const li = document.createElement('li');
-    li.setAttribute('role','none');
+    li.setAttribute('role', 'none');
     const btn = document.createElement('button');
     btn.className = `vh-status-menu__option vh-status-menu__option--${status}`;
-    btn.setAttribute('role','menuitem');
+    btn.setAttribute('role', 'menuitem');
     btn.dataset.status = status;
     const i = document.createElement('span');
-    i.setAttribute('aria-hidden','true');
+    i.setAttribute('aria-hidden', 'true');
     i.textContent = icon;
     const s = document.createElement('span');
     s.textContent = label;
@@ -1087,7 +816,7 @@ function _ensureStatusMenu() {
   overlay.className = 'vh-overlay';
   overlay.id        = 'menuOverlay';
   overlay.hidden    = true;
-  overlay.setAttribute('aria-hidden','true');
+  overlay.setAttribute('aria-hidden', 'true');
   document.body.appendChild(menu);
   document.body.appendChild(overlay);
   _dom.statusMenu  = menu;
@@ -1104,7 +833,186 @@ function _ensureStatusMenu() {
 
 
 // ─────────────────────────────────────────────
-// 10. INICIALIZACIÓN
+// 10. ACCIONES DE BIBLIOTECA
+// ─────────────────────────────────────────────
+
+function _confirmAndRemove(vnId) {
+  const vnEntry = _state.vnCache.get(vnId);
+  const title   = vnEntry?.title    ?? vnId;
+  const imgUrl  = vnEntry?.imageUrl ?? '';
+  ModalDelete.open(vnId, title, imgUrl, () => _executeRemove(vnId));
+}
+
+function _executeRemove(vnId) {
+  const title      = _state.vnCache.get(vnId)?.title ?? vnId;
+  const wasRemoved = LibraryStore.removeVn(vnId);
+
+  if (wasRemoved) {
+    _showToast(`"${title}" eliminada de la biblioteca`, 'success');
+  } else {
+    console.warn(`[UI] removeVn("${vnId}") devolvió false — entrada no encontrada.`);
+  }
+}
+
+
+// ─────────────────────────────────────────────
+// 11. REGISTRO DE EVENTOS
+// ─────────────────────────────────────────────
+
+function _bindEvents() {
+
+  // Toggle tema
+  _dom.themeToggle?.addEventListener('click', () => ThemeManager.toggle());
+
+  // Navegación principal (incluye navProfile)
+  ['navSearch', 'navLibrary', 'navFeed', 'navProfile'].forEach(id => {
+    _dom[id]?.addEventListener('click', (e) => {
+      _switchView(e.currentTarget.dataset.view);
+    });
+  });
+
+  // Evento personalizado 'vnh:navigate' — disparado por profile-controller
+  // y auth-controller para navegar programáticamente a una vista.
+  document.addEventListener('vnh:navigate', (e) => {
+    const { view, uid } = e.detail ?? {};
+    if (!view) return;
+
+    if (view === 'profile') {
+      // Forzar actualización de vista sin guard de auth
+      _state.view = '';
+      _switchView('profile');
+      // Si hay uid específico (perfil ajeno), abrirlo directamente
+      if (uid) ProfileController.openProfile(uid);
+    } else {
+      _switchView(view);
+    }
+  });
+
+  // Buscador
+  _dom.searchInput?.addEventListener('input', _onSearchInput);
+  _dom.searchInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      clearTimeout(_searchDebounceTimer);
+      const query = e.target.value.trim();
+      if (query.length >= 2) {
+        _setSearchState('loading');
+        _executeSearch(query, 1);
+      }
+    }
+  });
+
+  // Limpiar búsqueda
+  _dom.searchClear?.addEventListener('click', () => {
+    if (_dom.searchInput) _dom.searchInput.value = '';
+    _dom.searchClear.hidden = true;
+    _setSearchState('idle');
+    _clearSearchResults();
+  });
+
+  // Paginación
+  _dom.prevPage?.addEventListener('click', () => {
+    if (_state.searchPage > 1) _executeSearch(_state.searchQuery, _state.searchPage - 1);
+  });
+  _dom.nextPage?.addEventListener('click', () => {
+    if (_state.searchHasMore) _executeSearch(_state.searchQuery, _state.searchPage + 1);
+  });
+
+  // Pestañas de biblioteca
+  document.querySelector('.vh-tabs')?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[role="tab"]');
+    if (btn) _activateTab(btn.dataset.status);
+  });
+
+  document.querySelector('.vh-tabs')?.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    const tabs    = [...document.querySelectorAll('[role="tab"]')];
+    const idx     = tabs.indexOf(document.activeElement);
+    if (idx === -1) return;
+    const nextIdx = e.key === 'ArrowRight'
+      ? (idx + 1) % tabs.length
+      : (idx - 1 + tabs.length) % tabs.length;
+    tabs[nextIdx].focus();
+    tabs[nextIdx].click();
+    e.preventDefault();
+  });
+
+  // Grid de búsqueda
+  _dom.searchResults?.addEventListener('click', _handleGridClick);
+
+  // Paneles de biblioteca
+  document.getElementById('viewLibrary')?.addEventListener('click', _handleLibraryClick);
+
+  // Menú flotante
+  _dom.statusMenu?.addEventListener('click', (e) => {
+    const btn = e.target.closest('[role="menuitem"][data-status]');
+    if (btn) _applyStatusSelection(btn.dataset.status);
+  });
+
+  _dom.statusMenu?.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') _closeStatusMenu();
+  });
+
+  _dom.menuOverlay?.addEventListener('click', _closeStatusMenu);
+
+  // Botón "ir a búsqueda" desde estados vacíos
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('[data-go-search]')) {
+      _switchView('search');
+      _dom.searchInput?.focus();
+    }
+  });
+
+  window.addEventListener('resize', () => {
+    if (!_dom.statusMenu || _dom.statusMenu.hidden) return;
+    _closeStatusMenu();
+  });
+
+  window.addEventListener('scroll', () => {
+    if (!_dom.statusMenu || _dom.statusMenu.hidden) return;
+    _closeStatusMenu();
+  }, { passive: true });
+}
+
+function _handleGridClick(e) {
+  const btn = e.target.closest('[data-action][data-vn-id]');
+  if (!btn) return;
+  if (btn.dataset.action === 'open-status-menu') {
+    _openStatusMenu(btn.dataset.vnId, btn);
+  }
+}
+
+function _handleLibraryClick(e) {
+  const btn = e.target.closest('[data-action][data-vn-id]');
+  if (!btn) return;
+
+  const { action, vnId } = btn.dataset;
+
+  switch (action) {
+    case 'open-status-menu':
+      _openStatusMenu(vnId, btn);
+      break;
+    case 'remove-vn':
+      _confirmAndRemove(vnId);
+      break;
+    case 'edit-log':
+      _openModalForStatus(VN_STATUS.PLAYING, vnId,
+        _state.vnCache.get(vnId)?.title ?? vnId, '');
+      break;
+    case 'edit-review':
+      _openModalForStatus(VN_STATUS.FINISHED, vnId,
+        _state.vnCache.get(vnId)?.title   ?? vnId,
+        _state.vnCache.get(vnId)?.imageUrl ?? '');
+      break;
+    case 'edit-comment':
+      _openModalForStatus(VN_STATUS.DROPPED, vnId,
+        _state.vnCache.get(vnId)?.title ?? vnId, '');
+      break;
+  }
+}
+
+
+// ─────────────────────────────────────────────
+// 12. INICIALIZACIÓN
 // ─────────────────────────────────────────────
 
 function init() {
