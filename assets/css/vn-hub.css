@@ -33,90 +33,112 @@
 ──────────────────────────────────────────────────────────────── */
 
 :root {
-  /* ── MODO CLARO: Blanco · Rosa · Celeste ── */
-
-  /* Fondos glass */
-  --vh-bg-base:        #f0e8f4;
-  --vh-bg-surface:     rgba(255, 255, 255, 0.75);
-  --vh-bg-elevated:    rgba(255, 255, 255, 0.55);
-  --vh-bg-card:        rgba(255, 255, 255, 0.72);
-  --vh-bg-overlay:     rgba(240, 232, 244, 0.92);
-
   /*
-   * Gradiente de fondo del body.
-   * Técnica del CSS de referencia: radial-gradients superpuestos
-   * que crean atmósfera y profundidad — adaptados a Rosa + Celeste.
+   * ── MODO CLARO v3: inspirado en la estética de VNDB.org ──
+   *
+   * VNDB usa una paleta clínica y limpia: blanco puro como base,
+   * grises azulados muy apagados para superficies, un único acento
+   * cromático medio y texto casi negro. No tiene gradientes llamativos
+   * ni saturación alta — todo es legible y descansado.
+   *
+   * Traducción para VN-Hub (conservando blanco · rosa · rojo · celeste):
+   *
+   *  · Base:     blanco puro #ffffff con superficies gris-rosado muy sutil.
+   *              No hay tinte morado ni lila en el fondo.
+   *
+   *  · Rosa:     usado SOLO como acento, en tono medio-apagado #c0627a.
+   *              Botones, links, focus. No tiñe el fondo.
+   *
+   *  · Rojo:     reservado para danger y badge "dropped". #c0392b clásico,
+   *              legible y sin agresividad en fondos claros.
+   *
+   *  · Celeste:  acento secundario en tono slate #5b8fa8.
+   *              Complementa el rosa sin competir.
+   *
+   *  · Texto:    #1a1a1a sobre blanco — contraste WCAG AAA.
+   *
+   *  · Bordes:   grises finos, sin color. Estructuran sin decorar.
+   *
+   *  · Sin gradientes atmosféricos agresivos: solo un toque muy sutil.
    */
-  --vh-body-bg-color:  #f0e8f4;
+
+  /* Fondos */
+  --vh-bg-base:        #f5f5f5;
+  --vh-bg-surface:     #ffffff;
+  --vh-bg-elevated:    #ffffff;
+  --vh-bg-card:        #ffffff;
+  --vh-bg-overlay:     rgba(245, 245, 245, 0.97);
+
+  /* Gradiente del body: casi plano, un toque mínimo de rosa y celeste
+   * en las esquinas. Opacidades ≤ 0.06 — atmósfera sin protagonismo. */
+  --vh-body-bg-color:  #f5f5f5;
   --vh-body-gradient:
-    radial-gradient(ellipse at 15% 20%,  rgba(236, 72,  153, 0.20) 0%, transparent 50%),
-    radial-gradient(ellipse at 85% 10%,  rgba(14,  165, 233, 0.15) 0%, transparent 45%),
-    radial-gradient(ellipse at 50% 80%,  rgba(244, 114, 182, 0.14) 0%, transparent 55%),
-    radial-gradient(ellipse at 90% 90%,  rgba(56,  189, 248, 0.10) 0%, transparent 40%);
+    radial-gradient(ellipse at 0%   0%,   rgba(192,  98, 122, 0.06) 0%, transparent 45%),
+    radial-gradient(ellipse at 100% 100%, rgba( 91, 143, 168, 0.05) 0%, transparent 45%);
 
   /* Texto */
-  --vh-text-primary:   #2d1b3d;
-  --vh-text-secondary: #5b4068;
-  --vh-text-muted:     #a891b8;
+  --vh-text-primary:   #1a1a1a;
+  --vh-text-secondary: #555555;
+  --vh-text-muted:     #999999;
   --vh-text-on-accent: #ffffff;
 
-  /* Paleta Rosa */
-  --vh-pink-50:        #fff0f6;
-  --vh-pink-100:       #ffd6eb;
-  --vh-pink-300:       #f9a8d4;
-  --vh-pink-400:       #f472b6;
-  --vh-pink-500:       #ec4899;
-  --vh-pink-600:       #db2777;
+  /* Paleta Rosa — tono medio apagado, sin neón */
+  --vh-pink-50:        #fdf2f4;
+  --vh-pink-100:       #f5d5db;
+  --vh-pink-300:       #d98898;
+  --vh-pink-400:       #cc6e80;
+  --vh-pink-500:       #c0627a;
+  --vh-pink-600:       #a84e65;
 
-  /* Paleta Celeste */
-  --vh-sky-50:         #f0f9ff;
-  --vh-sky-100:        #e0f2fe;
-  --vh-sky-300:        #7dd3fc;
-  --vh-sky-400:        #38bdf8;
-  --vh-sky-500:        #0ea5e9;
-  --vh-sky-600:        #0284c7;
+  /* Paleta Celeste — slate azulado apagado */
+  --vh-sky-50:         #f0f5f8;
+  --vh-sky-100:        #d5e5ee;
+  --vh-sky-300:        #82b4cc;
+  --vh-sky-400:        #6aa0bc;
+  --vh-sky-500:        #5b8fa8;
+  --vh-sky-600:        #4a7a92;
 
   /* Acentos */
-  --vh-accent:         #ec4899;
-  --vh-accent-hover:   #db2777;
-  --vh-accent-soft:    rgba(236, 72, 153, 0.10);
-  --vh-accent-2:       #0ea5e9;
-  --vh-accent-2-soft:  rgba(14, 165, 233, 0.10);
+  --vh-accent:         #c0627a;
+  --vh-accent-hover:   #a84e65;
+  --vh-accent-soft:    rgba(192, 98, 122, 0.08);
+  --vh-accent-2:       #5b8fa8;
+  --vh-accent-2-soft:  rgba(91, 143, 168, 0.08);
 
-  /* Bordes glass */
-  --vh-border:         rgba(236, 72, 153, 0.16);
-  --vh-border-focus:   #ec4899;
-  --vh-border-hover:   rgba(236, 72, 153, 0.48);
-  --vh-border-card:    rgba(255, 255, 255, 0.65);
+  /* Bordes — grises neutros, sin tinte de color */
+  --vh-border:         #d8d8d8;
+  --vh-border-focus:   #c0627a;
+  --vh-border-hover:   #b0b0b0;
+  --vh-border-card:    #e8e8e8;
 
-  /* Sombras rosadas */
-  --vh-shadow-sm:           0 2px 8px  rgba(175, 60, 120, 0.10), 0 1px 2px rgba(175, 60, 120, 0.06);
-  --vh-shadow-md:           0 6px 20px rgba(175, 60, 120, 0.14), 0 2px 6px rgba(175, 60, 120, 0.08);
-  --vh-shadow-lg:           0 12px 40px rgba(175, 60, 120, 0.20), 0 4px 10px rgba(175, 60, 120, 0.10);
-  --vh-shadow-accent:       0 4px 20px rgba(236, 72, 153, 0.38);
-  --vh-shadow-accent-hover: 0 6px 30px rgba(236, 72, 153, 0.52);
-  --vh-shadow-focus:        0 0 0 3px  rgba(236, 72, 153, 0.22);
+  /* Sombras — neutras y sutiles, como VNDB */
+  --vh-shadow-sm:           0 1px 3px  rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.05);
+  --vh-shadow-md:           0 4px 12px rgba(0, 0, 0, 0.10), 0 2px 4px rgba(0, 0, 0, 0.06);
+  --vh-shadow-lg:           0 8px 28px rgba(0, 0, 0, 0.13), 0 4px 8px rgba(0, 0, 0, 0.07);
+  --vh-shadow-accent:       0 4px 16px rgba(192, 98, 122, 0.22);
+  --vh-shadow-accent-hover: 0 6px 24px rgba(192, 98, 122, 0.32);
+  --vh-shadow-focus:        0 0 0 3px  rgba(192, 98, 122, 0.18);
 
-  /* Colores semánticos de peligro */
-  --vh-danger:    #ef4444;
-  --vh-danger-bg: rgba(239, 68, 68, 0.10);
+  /* Danger — rojo clásico legible */
+  --vh-danger:    #c0392b;
+  --vh-danger-bg: rgba(192, 57, 43, 0.08);
 
-  /* Badges de estado */
-  --vh-badge-pending-bg:   rgba(254, 240, 138, 0.55);
-  --vh-badge-pending-fg:   #854d0e;
-  --vh-badge-pending-bd:   #fde047;
+  /* Badges — fondos muy apagados, texto con contraste suficiente */
+  --vh-badge-pending-bg:   #fef9ec;
+  --vh-badge-pending-fg:   #7a5c10;
+  --vh-badge-pending-bd:   #e8d080;
 
-  --vh-badge-playing-bg:   rgba(187, 247, 208, 0.55);
-  --vh-badge-playing-fg:   #166534;
-  --vh-badge-playing-bd:   #86efac;
+  --vh-badge-playing-bg:   #eef7f1;
+  --vh-badge-playing-fg:   #1e5e38;
+  --vh-badge-playing-bd:   #88c9a0;
 
-  --vh-badge-finished-bg:  rgba(191, 219, 254, 0.55);
-  --vh-badge-finished-fg:  #1e40af;
-  --vh-badge-finished-bd:  #93c5fd;
+  --vh-badge-finished-bg:  #eef4f8;
+  --vh-badge-finished-fg:  #1e4a6a;
+  --vh-badge-finished-bd:  #82b4cc;
 
-  --vh-badge-dropped-bg:   rgba(254, 202, 202, 0.55);
-  --vh-badge-dropped-fg:   #991b1b;
-  --vh-badge-dropped-bd:   #fca5a5;
+  --vh-badge-dropped-bg:   #fdf0ee;
+  --vh-badge-dropped-fg:   #8a2418;
+  --vh-badge-dropped-bd:   #e8a090;
 
   /* Dimensiones */
   --vh-radius-sm:   6px;

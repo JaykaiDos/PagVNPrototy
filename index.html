@@ -12,8 +12,9 @@
   <link rel="stylesheet" href="assets/css/vn-hub.css" />
   <link rel="stylesheet" href="assets/css/vn-hub-components.css" />
   <link rel="stylesheet" href="assets/css/vn-hub-export.css" />
-  <!-- ► v5: Estilos del módulo de Perfil de Usuario -->
   <link rel="stylesheet" href="assets/css/vn-hub-profile.css" />
+  <!-- ► v6: Estilos del módulo de Exploración Rápida -->
+  <link rel="stylesheet" href="assets/css/vn-hub-explore.css" />
 </head>
 
 <body>
@@ -75,7 +76,6 @@
           </button>
         </li>
 
-        <!-- TAB FEED — visible solo si hay sesión activa -->
         <li id="navFeedItem" hidden>
           <button
             class="vh-nav__btn"
@@ -86,7 +86,6 @@
           </button>
         </li>
 
-        <!-- TAB PERFIL — visible solo si hay sesión activa -->
         <li id="navProfileItem" hidden>
           <button
             class="vh-nav__btn"
@@ -113,7 +112,8 @@
         <p class="vh-section-subtitle">Explora el catálogo</p>
       </section>
 
-      <div class="vh-search-bar" role="search">
+      <!-- ── Barra de búsqueda con autocompletado ── -->
+      <div class="vh-search-bar vep-search-wrapper" role="search">
         <label class="vh-sr-only" for="searchInput">Buscar novela visual</label>
         <div class="vh-search-bar__wrapper">
           <span class="vh-search-bar__icon" aria-hidden="true">✦</span>
@@ -126,10 +126,123 @@
             spellcheck="false"
             minlength="2"
             aria-label="Buscar visual novel por título"
+            aria-autocomplete="list"
+            aria-controls="vepAutocomplete"
+            aria-expanded="false"
           />
           <button class="vh-search-bar__clear" id="searchClear" aria-label="Limpiar búsqueda" hidden>✕</button>
         </div>
+
+        <!-- Dropdown de autocompletado: sibling directo del wrapper para posicionamiento -->
+        <div class="vep-autocomplete" id="vepAutocomplete"
+             role="listbox" aria-label="Sugerencias de búsqueda" hidden>
+          <ul class="vep-autocomplete__list" id="vepAutocompleteList"></ul>
+          <p class="vep-autocomplete__hint" aria-hidden="true">
+            <kbd>↑↓</kbd> navegar · <kbd>Enter</kbd> seleccionar · <kbd>Esc</kbd> cerrar
+          </p>
+        </div>
       </div>
+
+      <!-- ═══════════════════════════════════════════════════════════
+           MÓDULO DE EXPLORACIÓN RÁPIDA
+      ════════════════════════════════════════════════════════════ -->
+      <section class="vep-panel" id="vepPanel" aria-label="Exploración rápida de visual novels">
+
+        <!-- A: Accesos directos por modo de exploración -->
+        <div class="vep-quick" role="group" aria-label="Modos de exploración rápida">
+
+          <button class="vep-quick__btn" data-filter="top" aria-pressed="false"
+                  title="100 mejor calificadas según rating bayesiano de VNDB">
+            <span class="vep-quick__icon" aria-hidden="true">🏆</span>
+            <strong class="vep-quick__name">Top Rated</strong>
+            <em class="vep-quick__meta">Rating bayesiano</em>
+          </button>
+
+          <button class="vep-quick__btn" data-filter="popular" aria-pressed="false"
+                  title="Ordenadas por volumen de votos en la comunidad global">
+            <span class="vep-quick__icon" aria-hidden="true">🔥</span>
+            <strong class="vep-quick__name">Populares</strong>
+            <em class="vep-quick__meta">Más votadas</em>
+          </button>
+
+          <button class="vep-quick__btn" data-filter="recent" aria-pressed="false"
+                  title="Lanzamientos de 2024 y 2025">
+            <span class="vep-quick__icon" aria-hidden="true">✨</span>
+            <strong class="vep-quick__name">Recientes</strong>
+            <em class="vep-quick__meta">2024 – 2025</em>
+          </button>
+
+          <button class="vep-quick__btn" data-filter="classics" aria-pressed="false"
+                  title="Joyas del catálogo lanzadas antes de 2010">
+            <span class="vep-quick__icon" aria-hidden="true">📜</span>
+            <strong class="vep-quick__name">Clásicos</strong>
+            <em class="vep-quick__meta">Pre-2010</em>
+          </button>
+
+        </div>
+
+        <!-- B: Filtro por rango de año de lanzamiento -->
+        <div class="vep-year" id="vepYearBlock">
+
+          <div class="vep-year__header">
+            <span class="vep-block-label">📅 Rango de lanzamiento</span>
+            <button class="vep-chip-reset" id="vepYearReset" hidden>✕ Limpiar</button>
+          </div>
+
+          <div class="vep-year__presets" role="group" aria-label="Períodos predefinidos">
+            <button class="vep-year__chip" data-yfrom="2025" data-yto="2025">2025</button>
+            <button class="vep-year__chip" data-yfrom="2024" data-yto="2024">2024</button>
+            <button class="vep-year__chip" data-yfrom="2020" data-yto="2023">2020–2023</button>
+            <button class="vep-year__chip" data-yfrom="2010" data-yto="2019">2010–2019</button>
+            <button class="vep-year__chip" data-yfrom="1980" data-yto="2009">Pre-2010</button>
+          </div>
+
+          <div class="vep-year__custom">
+            <label class="vep-year__label" for="vepYearFrom">Desde</label>
+            <input class="vep-year__input" id="vepYearFrom" type="number"
+                   min="1980" max="2025" placeholder="1980" autocomplete="off" />
+            <span class="vep-year__sep" aria-hidden="true">→</span>
+            <label class="vep-year__label" for="vepYearTo">Hasta</label>
+            <input class="vep-year__input" id="vepYearTo" type="number"
+                   min="1980" max="2025" placeholder="2025" autocomplete="off" />
+            <button class="vep-apply-btn" id="vepYearApply">Aplicar</button>
+          </div>
+
+        </div>
+
+        <!-- C: Botonera de etiquetas/géneros dinámicos -->
+        <div class="vep-tags" id="vepTagsBlock">
+
+          <div class="vep-tags__header">
+            <span class="vep-block-label">🏷️ Géneros &amp; Etiquetas</span>
+
+            <div class="vep-logic" role="group" aria-label="Modo de combinación de etiquetas">
+              <button class="vep-logic__btn vep-logic__btn--on" id="vepLogicAnd"
+                      data-logic="AND" aria-pressed="true">AND</button>
+              <button class="vep-logic__btn" id="vepLogicOr"
+                      data-logic="OR" aria-pressed="false">OR</button>
+            </div>
+
+            <button class="vep-chip-reset" id="vepTagsClear" hidden>✕ Etiquetas</button>
+          </div>
+
+          <!-- Contador predictivo de resultados -->
+          <p class="vep-tags__counter" id="vepTagsCounter" aria-live="polite" hidden></p>
+
+          <!-- Grid de etiquetas — renderizado por explore-controller.js -->
+          <div class="vep-tags__grid" id="vepTagsGrid"
+               role="group" aria-label="Etiquetas de género para filtrar"></div>
+
+        </div>
+
+        <!-- D: Barra de estado de filtros activos -->
+        <div class="vep-status" id="vepStatusBar" hidden>
+          <span class="vep-status__text" id="vepStatusText" aria-live="polite"></span>
+          <button class="vep-status__clear" id="vepClearAll">✕ Limpiar todo</button>
+        </div>
+
+      </section>
+      <!-- /MÓDULO DE EXPLORACIÓN RÁPIDA -->
 
       <div class="vh-search-state" id="searchState" aria-live="polite">
         <div class="vh-search-state__idle">
@@ -262,8 +375,6 @@
 
   <!-- ═══════════════════════════════════════════════════════════════
        VISTA: PERFIL DE USUARIO
-       Visible para usuarios autenticados. También accesible via
-       URL con ?profile=UID para perfiles públicos de otros usuarios.
   ═══════════════════════════════════════════════════════════════ -->
   <main class="vh-view vh-view--hidden" id="viewProfile" data-view="profile" hidden>
     <div class="vh-container">
@@ -272,10 +383,6 @@
         <h2 class="vh-section-title">Perfil</h2>
       </section>
 
-      <!--
-        profileContent: profile-controller.js inyecta aquí todo el contenido
-        dinámico (hero, stats, tabs, grid de VNs, reseñas, comparador de afinidad).
-      -->
       <div id="profileContent" aria-live="polite"></div>
 
     </div>
@@ -335,6 +442,8 @@
   <script type="module" src="js/ui-controller.js"></script>
   <script type="module" src="js/feed-controller.js"></script>
   <script type="module" src="js/profile-controller.js"></script>
+  <!-- ► v6: Módulo de Exploración Rápida -->
+  <script type="module" src="js/explore-controller.js"></script>
 
 
 </body>
