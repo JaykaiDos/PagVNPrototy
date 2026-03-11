@@ -4,6 +4,23 @@
  * @file js/profile-controller.js
  * @description Controlador del Módulo de Perfil de Usuario.
  *
+ * CAMBIOS v3:
+ *  - [BUG FIX] init(): corregido ReferenceError "Cannot access 'unsub' before
+ *    initialization". La variable `unsub` se usaba dentro del callback de
+ *    onAuthChange antes de que la asignación const completara (Temporal Dead
+ *    Zone). Solución: declarar con `let` antes del bloque de asignación.
+ *
+ *  - [ARQUITECTURA] Soporte real de perfiles públicos compartidos sin sesión:
+ *    El problema central era que viewProfile y el tab "Perfil" están hidden
+ *    para usuarios no autenticados, y _switchView() bloqueaba el acceso.
+ *    Solución: init() detecta ?profile=UID y fuerza la visualización de la
+ *    vista de perfil directamente, sin pasar por _switchView() ni por el
+ *    guard de auth de ui-controller.
+ *
+ *  - [FLUJO POST-LOGIN] Si hay un ?profile=UID pendiente y el usuario inicia
+ *    sesión, se carga el perfil compartido (no el propio). El UID pendiente
+ *    se expone vía getPendingProfileUid() para que auth-controller lo consuma.
+ *
  * CAMBIOS v2:
  *  - Botón ✏️ "Editar nombre" en el hero (solo perfil propio).
  *  - Modal inline _openEditNameModal() con validación y guardado en Firestore.
@@ -51,6 +68,14 @@ const _state = {
   loading:        false,
 };
 
+/**
+ * UID del perfil compartido detectado en la URL al cargar la página.
+ * Se consume en auth-controller._onAuthChange() para redirigir al perfil
+ * correcto después del login, en lugar de abrir el perfil propio.
+ * @type {string|null}
+ */
+let _pendingProfileUid = null;
+
 
 // ─────────────────────────────────────────────────────────────
 // REFERENCIAS DOM
@@ -72,9 +97,61 @@ function _cacheDOM() {
 
 function init() {
   _cacheDOM();
+
   const urlUid = _getProfileUidFromUrl();
-  if (urlUid) _navigateToProfile(urlUid);
+  if (!urlUid) {
+    console.info('[ProfileController] Inicializado ✓');
+    return;
+  }
+
+  // Guardar el UID para que auth-controller lo use si el usuario inicia sesión.
+  // Esto resuelve el caso: usuario no autenticado abre el enlace → inicia sesión
+  // → debe ver el perfil compartido, no el suyo propio.
+  _pendingProfileUid = urlUid;
+
+  // Mostrar la vista de perfil directamente, sin pasar por _switchView().
+  // _switchView() tiene un guard de auth que bloquearía a visitantes sin sesión.
+  // Los perfiles públicos no requieren autenticación para ser vistos.
+  _forceShowProfileView();
+
+  // [BUG FIX] ReferenceError: Cannot access 'unsub' before initialization.
+  // El error original usaba `const unsub` cuyo valor se intentaba leer dentro
+  // del callback antes de que la línea de asignación terminara (Temporal Dead
+  // Zone de const/let). Solución: declarar con `let` ANTES del bloque, luego
+  // asignar. Así el closure captura la referencia al binding, no el valor.
+  let unsub;
+  unsub = FirebaseService.onAuthChange(() => {
+    if (unsub) unsub(); // Desuscribir tras el primer disparo (estado inicial resuelto)
+    openProfile(urlUid);
+  });
+
   console.info('[ProfileController] Inicializado ✓');
+}
+
+/**
+ * Muestra la vista del perfil y activa el nav item correspondiente
+ * sin pasar por _switchView() ni por su guard de autenticación.
+ * Necesario para permitir que visitantes sin sesión vean perfiles públicos.
+ *
+ * DISEÑO DELIBERADO: No usamos vnh:navigate ni _switchView porque ambos
+ * tienen guards de auth o lógica que abre el perfil PROPIO (null).
+ * Esta función hace solo lo mínimo: mostrar la vista correcta en el DOM.
+ */
+function _forceShowProfileView() {
+  // Ocultar todas las vistas principales
+  ['viewSearch', 'viewLibrary', 'viewFeed', 'viewProfile'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.hidden = true;
+    el.classList.add('vh-view--hidden');
+  });
+
+  // Mostrar solo la vista de perfil
+  const profileView = document.getElementById('viewProfile');
+  if (profileView) {
+    profileView.hidden = false;
+    profileView.classList.remove('vh-view--hidden');
+  }
 }
 
 async function openProfile(uid = null) {
@@ -1018,4 +1095,14 @@ function _el(tag, cls = '') {
 // EXPORTACIÓN
 // ═══════════════════════════════════════════════════════════════
 
-export { init, openProfile };
+/**
+ * Devuelve el UID del perfil compartido detectado en la URL al iniciar,
+ * o null si no había ninguno. Auth-controller lo consume en _onAuthChange()
+ * para redirigir al perfil compartido tras el login en lugar del propio.
+ * @returns {string|null}
+ */
+function getPendingProfileUid() {
+  return _pendingProfileUid;
+}
+
+export { init, openProfile, getPendingProfileUid };

@@ -500,6 +500,20 @@ async function _onAuthChange(user) {
       setFeedTabVisible(true);
     } catch {}
 
+    // [FLUJO POST-LOGIN] Si el usuario llegó a través de un enlace compartido
+    // (?profile=UID), navegar al perfil compartido en lugar del propio.
+    // Sin esta lógica, el flujo normal abriría el perfil propio al hacer login.
+    try {
+      const { getPendingProfileUid } = await import('./profile-controller.js');
+      const pendingUid = getPendingProfileUid();
+      if (pendingUid && pendingUid !== user.uid) {
+        // Perfil ajeno pendiente → abrirlo directamente
+        const { openProfile } = await import('./profile-controller.js');
+        openProfile(pendingUid);
+        return; // No continuar con el flujo de perfil propio
+      }
+    } catch {}
+
   } else {
     _renderLoginButton();
     try {

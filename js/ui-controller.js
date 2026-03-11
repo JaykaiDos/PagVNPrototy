@@ -98,12 +98,16 @@ function _cacheDOM() {
 function _switchView(viewName) {
   if (viewName === _state.view) return;
 
-  // Guard de autenticación para Biblioteca y Perfil
+  // Guard de autenticación:
+  // - 'library' siempre requiere auth (datos privados del usuario).
+  // - 'profile' solo requiere auth cuando se navega desde el nav (perfil propio).
+  //   Los perfiles ajenos se cargan directamente desde profile-controller.init()
+  //   sin pasar por aquí, por lo que este guard nunca los bloquea.
   if (viewName === 'library' || viewName === 'profile') {
     const isAuthed = FirebaseService.isAuthenticated();
     if (!isAuthed) {
-      _showToast('Acceso restringido. Inicia sesión para continuar.', 'info');
-      viewName = 'search';
+      _showToast('Inicia sesión para continuar.', 'info');
+      return; // No redirigir a search, simplemente no navegar
     }
   }
 
