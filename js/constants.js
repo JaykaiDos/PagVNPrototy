@@ -11,8 +11,6 @@
 
 // ─────────────────────────────────────────────
 // 1. CLAVES DE ALMACENAMIENTO LOCAL
-//    Prefijo "vnh_" para evitar colisiones con
-//    otros proyectos en el mismo dominio.
 // ─────────────────────────────────────────────
 
 /** @type {string} Clave raíz de la biblioteca personal en localStorage */
@@ -24,9 +22,6 @@ const STORAGE_KEY_THEME = 'vnh_theme';
 
 // ─────────────────────────────────────────────
 // 2. ESTADOS DE NOVELA
-//    Enumeración de los cuatro estados válidos.
-//    Cada valor es la clave canónica usada en
-//    localStorage y en la lógica de negocio.
 // ─────────────────────────────────────────────
 
 /**
@@ -34,16 +29,14 @@ const STORAGE_KEY_THEME = 'vnh_theme';
  * @enum {string}
  */
 const VN_STATUS = Object.freeze({
-  PENDING:   'pending',    // 📌 Pendiente  — backlog
-  PLAYING:   'playing',    // 🎮 Jugando    — activa + bitácora
-  FINISHED:  'finished',   // 🏆 Finalizado — review completa
-  DROPPED:   'dropped',    // ❌ Abandonada — comentario breve
+  PENDING:   'pending',
+  PLAYING:   'playing',
+  FINISHED:  'finished',
+  DROPPED:   'dropped',
 });
 
 /**
  * Metadatos de UI para cada estado.
- * Mapea el valor canónico a su etiqueta, icono y clase CSS.
- *
  * @type {Record<string, {label: string, icon: string, cssClass: string}>}
  */
 const VN_STATUS_META = Object.freeze({
@@ -56,41 +49,101 @@ const VN_STATUS_META = Object.freeze({
 
 // ─────────────────────────────────────────────
 // 3. SISTEMA DE PESOS (Scoring Engine)
-//    Los pesos deben sumar 100 (excluyendo
-//    "extra" que es una bonificación opcional).
-//    Fuente: Mapa Maestro v1.
+//
+// REGLA INVARIANTE:
+//  Los pesos de las categorías BASE (aquellas sin bonus:true)
+//  DEBEN sumar exactamente 100. Si no suman 100, el motor de
+//  scoring produce resultados proporcionales incorrectos.
+//
+//  La suma se verifica automáticamente en tiempo de módulo
+//  (ver aserción _assertWeightIntegrity más abajo).
+//  Si la suma es incorrecta, la app lanza un error inmediatamente
+//  al arrancar — nunca llega a producción silenciosa.
 // ─────────────────────────────────────────────
 
 /**
  * @typedef {Object} ScoreCategory
- * @property {string} key        - Identificador interno
- * @property {string} label      - Nombre visible al usuario
- * @property {number} weight     - Peso porcentual (0-100)
+ * @property {string}  key       - Identificador interno
+ * @property {string}  label     - Nombre visible al usuario
+ * @property {number}  weight    - Peso porcentual (0-100)
  * @property {boolean} [bonus]   - Si true, es bonificación (no forma parte de la base)
  * @property {boolean} [optional]- Si true, el campo puede omitirse (ej: contenido adulto)
  */
 
 /** @type {ScoreCategory[]} */
 const SCORE_CATEGORIES = Object.freeze([
-  { key: 'story',        label: 'Historia / Guion',          weight: 30  },
-  { key: 'characters',   label: 'Personajes',                weight: 15  },
-  { key: 'art',          label: 'Diseño (Personajes/Fondos)',  weight: 6   },
-  { key: 'cg',           label: 'Animaciones / CG',          weight: 10  },
-  { key: 'adult',        label: 'Escenas H',                 weight: 15, optional: true },
-  { key: 'audio',        label: 'Música, Voces y Sonidos',   weight: 10  },
-  { key: 'ux',           label: 'Interfaz / UX',             weight: 4   },
-  { key: 'replayability',label: 'Rejugabilidad / Extra',     weight: 10  },
-  { key: 'extra',        label: 'Puntos Extra (impacto)',    weight: 15, bonus: true },
+  { key: 'story',         label: 'Historia / Guion',           weight: 30              },
+  { key: 'characters',    label: 'Personajes',                 weight: 15              },
+  { key: 'art',           label: 'Diseño (Personajes/Fondos)', weight: 6               },
+  { key: 'cg',            label: 'Animaciones / CG',           weight: 10              },
+  { key: 'adult',         label: 'Escenas H',                  weight: 15, optional: true },
+  { key: 'audio',         label: 'Música, Voces y Sonidos',    weight: 10              },
+  { key: 'ux',            label: 'Interfaz / UX',              weight: 4               },
+  { key: 'replayability', label: 'Rejugabilidad / Extra',      weight: 10              },
+  { key: 'extra',         label: 'Puntos Extra (impacto)',      weight: 15, bonus: true },
+  //
+  // ── Si modificás estos pesos, la suma de los no-bonus DEBE ser 100. ──
+  // La aserción _assertWeightIntegrity() lo verificará al cargar la app.
+  //
+  // Suma actual (sin bonus):
+  //   story(30) + characters(15) + art(6) + cg(10) + adult(15)
+  //   + audio(10) + ux(4) + replayability(10) = 100 ✓
 ]);
 
 /**
- * Peso base total (sin bonificación).
- * Útil para validar que los pesos base sumen exactamente 100.
+ * Suma de pesos base (sin bonificación).
+ * Debe ser exactamente 100. La aserción debajo lo garantiza.
  * @type {number}
  */
 const SCORE_BASE_WEIGHT_TOTAL = SCORE_CATEGORIES
   .filter(c => !c.bonus)
-  .reduce((sum, c) => sum + c.weight, 0); // Debe ser 100
+  .reduce((sum, c) => sum + c.weight, 0);
+
+
+// ─────────────────────────────────────────────
+// CORRECCIÓN BUG-08 — Aserción de integridad de pesos
+//
+// DISEÑO:
+//  Esta función se ejecuta UNA SOLA VEZ al cargar el módulo.
+//  No tiene impacto en rendimiento en producción.
+//
+//  Por qué lanzar un Error y no solo console.warn:
+//  - Un warn puede ignorarse. Un Error detiene la app inmediatamente.
+//  - En GitHub Pages (producción estática) no hay logs de servidor.
+//    El único momento seguro para detectar esto es al arrancar.
+//  - El mensaje incluye el valor incorrecto para acelerar el debug.
+//
+//  Cuándo se activa:
+//  - Durante desarrollo al modificar pesos sin recalcular la suma.
+//  - En QA si se copia un constants.js con pesos mal editados.
+//  - NUNCA en producción si los pesos son correctos (función no-op).
+// ─────────────────────────────────────────────
+
+/**
+ * Verifica que los pesos base de SCORE_CATEGORIES sumen exactamente 100.
+ * Lanza un Error descriptivo si la suma es incorrecta.
+ *
+ * @throws {Error} Si SCORE_BASE_WEIGHT_TOTAL !== 100.
+ */
+function _assertWeightIntegrity() {
+  if (SCORE_BASE_WEIGHT_TOTAL === 100) return; // caso feliz — no-op
+
+  // Construir detalle de cada categoría para facilitar el debug
+  const detail = SCORE_CATEGORIES
+    .filter(c => !c.bonus)
+    .map(c => `  ${c.key}: ${c.weight}`)
+    .join('\n');
+
+  throw new Error(
+    `[constants.js] Los pesos base de SCORE_CATEGORIES deben sumar 100.\n` +
+    `Suma actual: ${SCORE_BASE_WEIGHT_TOTAL}\n` +
+    `Desglose:\n${detail}\n` +
+    `Ajustá los pesos para que la suma sea exactamente 100.`
+  );
+}
+
+// Ejecutar la aserción en tiempo de módulo
+_assertWeightIntegrity();
 
 
 // ─────────────────────────────────────────────
@@ -98,19 +151,14 @@ const SCORE_BASE_WEIGHT_TOTAL = SCORE_CATEGORIES
 // ─────────────────────────────────────────────
 
 /**
- * Endpoint de la API VNDB (WebSocket JSON-API v2).
- * VNDB no expone REST directamente; se usa el endpoint
- * de la HTTPS query API disponible públicamente.
- *
+ * Endpoint de la API VNDB (HTTPS query API v2).
  * @see https://api.vndb.org/kana
  */
 const VNDB_API_BASE = 'https://api.vndb.org/kana';
 
 /**
  * Campos solicitados al endpoint /vn de VNDB.
- * Limitamos los campos al mínimo necesario para reducir
- * el tamaño de la respuesta (rendimiento en GitHub Pages).
- *
+ * Limitamos al mínimo necesario para reducir el tamaño de respuesta.
  * @type {string[]}
  */
 const VNDB_VN_FIELDS = Object.freeze([
@@ -129,18 +177,18 @@ const VNDB_VN_FIELDS = Object.freeze([
   'tags.rating',
   'developers.name',
 ]);
+
 const VNDB_VN_FIELDS_STR = VNDB_VN_FIELDS.join(', ');
 
 /**
- * Número máximo de resultados por página en la búsqueda.
+ * Número máximo de resultados por página.
  * VNDB permite un máximo de 100 por petición.
  * @type {number}
  */
 const VNDB_PAGE_SIZE = 24;
 
 /**
- * Tiempo máximo de espera (ms) para peticiones a VNDB
- * antes de abortar y mostrar error al usuario.
+ * Tiempo máximo de espera (ms) para peticiones a VNDB.
  * @type {number}
  */
 const VNDB_REQUEST_TIMEOUT_MS = 10_000;
@@ -161,7 +209,7 @@ const TOAST_DURATION_MS = 3_500;
 
 
 // ─────────────────────────────────────────────
-// EXPORTACIÓN (ES Modules para uso modular)
+// EXPORTACIÓN
 // ─────────────────────────────────────────────
 export {
   // Storage

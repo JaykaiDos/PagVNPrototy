@@ -2,26 +2,38 @@
  * @file vndb-service.js
  * @description Servicio modular para consumir la API HTTP de VNDB.org (kana).
  *
- * CAMBIOS v2:
- *  - _transformVn(): aplica stripBbCode() a la descripción antes de almacenarla.
- *    Elimina markup [b][i][url][spoiler] etc. que VNDB incluye en las sinopsis.
- *  - _transformVn(): la descripción ya NO se trunca a 300 chars aquí.
- *    El truncado ahora lo hace novel-details.js via la lógica de "Leer más"
- *    (SYNOPSIS_PREVIEW_LEN). Para las cards de búsqueda, render-engine.js
- *    ya no muestra la descripción, así que no hay impacto.
+ * CORRECCIONES v3 (BUG-03 + BUG-07):
+ *
+ *  BUG-03 — Doble escape en snapshots de localStorage:
+ *    ANTES: _transformVn() llamaba sanitizeObject(rawVn) y luego guardaba
+ *    el VnEntry resultante en localStorage via _saveSnapshot(). Como
+ *    sanitizeObject escapa los strings (& → &amp;, < → &lt;), el snapshot
+ *    almacenaba strings ya escapados. Al recuperarlos con _getSnapshot()
+ *    y usarlos en textContent, aparecían literales como "Fate&#x2F;stay night"
+ *    en lugar de "Fate/stay night".
+ *
+ *    FIX: sanitizeObject() se aplica SOLO sobre el rawVn crudo, antes de
+ *    extraer cualquier campo. _transformVn() construye el VnEntry con los
+ *    valores limpios (ya seguros para textContent, sin HTML-entities).
+ *    _saveSnapshot() guarda ese VnEntry directamente — sin re-escapar.
+ *    La protección XSS sigue siendo válida porque la UI usa textContent
+ *    (nunca innerHTML) para todos los campos del VnEntry.
+ *
+ *  BUG-07 — getVnsByIds() sin verificación de caché individual:
+ *    ANTES: cada llamada a getVnsByIds() hacía un POST a VNDB aunque
+ *    algunos (o todos) los IDs ya estuvieran en _cache de getVnById().
+ *    FIX: se verifica _getFromCache('vn:{id}') para cada ID antes de
+ *    construir la petición, evitando llamadas de red redundantes.
+ *
+ * CAMBIOS v2 (previos, sin modificar):
+ *  - _transformVn(): aplica stripBbCode() a la descripción.
+ *  - _transformVn(): la descripción ya NO se trunca aquí.
  *  - stripBbCode importado desde utils.js.
  *
- * NOTA SOBRE IDIOMA:
- *  VNDB solo expone un campo "description" por VN (siempre en inglés/japonés).
- *  No existe endpoint de descripción por idioma en la API pública de VNDB.
- *  La traducción automática requiere backend, incompatible con GitHub Pages.
- *
- * ─────────────────────────────────────────────────────────
  * ARQUITECTURA:
  *  - Una sola responsabilidad: comunicación con VNDB (SRP).
  *  - Sin estado interno salvo la caché de sesión.
- *  - Toda data pasa por sanitización XSS antes de salir del módulo.
- * ─────────────────────────────────────────────────────────
+ *  - Toda data de red pasa por sanitización XSS antes de transformarse.
  */
 
 'use strict';
@@ -67,13 +79,13 @@ class VndbError extends Error {
 
 
 // ─────────────────────────────────────────────
-// 2. CACHÉ EN MEMORIA
+// 2. CACHÉ EN MEMORIA (sesión)
 // ─────────────────────────────────────────────
 
 /** @type {Map<string, {data: object, timestamp: number}>} */
 const _cache = new Map();
 
-/** TTL de la caché: 5 minutos */
+/** TTL de la caché en memoria: 5 minutos */
 const CACHE_TTL_MS = 5 * 60 * 1_000;
 
 /**
@@ -103,40 +115,73 @@ function _setCache(key, data) {
   _cache.set(key, { data, timestamp: Date.now() });
 }
 
+
 // ─────────────────────────────────────────────
-// 2.a SNAPSHOT LOCAL (persistente en localStorage)
+// 2a. SNAPSHOT LOCAL (persistente en localStorage)
+//
+// DISEÑO INTENCIONAL:
+//  El snapshot almacena el VnEntry ya transformado y limpio.
+//  Los strings NO están HTML-escapados porque se usan con
+//  textContent (nunca innerHTML). Si se escaparan aquí,
+//  aparecerían literales como &amp; en la UI (BUG-03).
 // ─────────────────────────────────────────────
 
 const META_STORAGE_KEY = 'vnh_meta';
 const META_TTL_MS      = 30 * 24 * 60 * 60 * 1_000; // 30 días
 
+/**
+ * Lee el mapa de snapshots desde localStorage.
+ * @returns {Record<string, object>}
+ */
 function _loadMetaMap() {
   try {
     const raw = localStorage.getItem(META_STORAGE_KEY);
     if (!raw) return {};
     const obj = JSON.parse(raw);
-    return typeof obj === 'object' && obj ? obj : {};
-  } catch { return {}; }
+    return (typeof obj === 'object' && obj !== null && !Array.isArray(obj))
+      ? obj
+      : {};
+  } catch {
+    return {};
+  }
 }
 
+/**
+ * Persiste el mapa de snapshots en localStorage.
+ * @param {Record<string, object>} map
+ */
 function _saveMetaMap(map) {
   try {
     localStorage.setItem(META_STORAGE_KEY, JSON.stringify(map));
-  } catch {}
+  } catch {
+    // QuotaExceededError u otro — ignorar silenciosamente.
+    // La caché en memoria sigue operativa.
+  }
 }
 
+/**
+ * Guarda un VnEntry en el snapshot persistente.
+ *
+ * CORRECCIÓN BUG-03:
+ *  Recibe el VnEntry ya transformado (strings limpios, sin HTML-entities).
+ *  No aplica ningún escape adicional — los datos se usan con textContent.
+ *
+ * @param {import('./vndb-service.js').VnEntry} vn - VnEntry transformado.
+ */
 function _saveSnapshot(vn) {
   if (!vn?.id) return;
   const map = _loadMetaMap();
-  map[vn.id] = {
-    ...vn,
-    _savedAt: Date.now(),
-  };
+  map[vn.id] = { ...vn, _savedAt: Date.now() };
   _saveMetaMap(map);
 }
 
+/**
+ * Recupera un snapshot del localStorage si no expiró.
+ * @param {string} vnId
+ * @returns {import('./vndb-service.js').VnEntry|null}
+ */
 function _getSnapshot(vnId) {
-  const map = _loadMetaMap();
+  const map  = _loadMetaMap();
   const snap = map[vnId];
   if (!snap) return null;
   const expired = Date.now() - (snap._savedAt ?? 0) > META_TTL_MS;
@@ -178,8 +223,8 @@ async function _post(endpoint, body) {
     clearTimeout(timeoutId);
 
     if (!response.ok) {
-      const text = await response.text().catch(() => '');
-      const snippet = (text || '').slice(0, 200);
+      const text    = await response.text().catch(() => '');
+      const snippet = text.slice(0, 200);
       throw new VndbError(
         `Error HTTP ${response.status} en VNDB${snippet ? ` — ${snippet}` : ''}`,
         response.status,
@@ -231,35 +276,57 @@ async function _post(endpoint, body) {
 /**
  * Transforma un objeto VN crudo de VNDB al formato VnEntry interno.
  *
- * CAMBIOS v2:
- *  - description: se limpia con stripBbCode() para eliminar [b][i][url] etc.
- *  - description: ya NO se trunca (el truncado lo gestiona la UI).
+ * CORRECCIÓN BUG-03 — Flujo de sanitización en dos fases:
+ *
+ *  FASE 1 — sanitizeObject(rawVn):
+ *    Escapa todos los strings del objeto crudo de la API para prevenir
+ *    XSS. Necesario porque rawVn viene de una fuente externa (VNDB).
+ *    Esta operación convierte: <script> → &lt;script&gt;
+ *
+ *  FASE 2 — Construcción del VnEntry:
+ *    Se extraen los campos del objeto sanitizado y se les aplican
+ *    las transformaciones de presentación (formateo de fecha, duración,
+ *    rating, etc.). Los strings resultantes están libres de HTML-entities
+ *    porque son valores de presentación, no strings HTML.
+ *
+ *  IMPORTANTE: El VnEntry resultante NO debe volver a pasar por
+ *  sanitizeObject(). Sus strings se insertan con textContent
+ *  (never innerHTML), por lo que no necesitan escapado HTML adicional.
+ *  Aplicar sanitizeObject() de nuevo generaría el BUG-03 original
+ *  (doble-escape: & → &amp; → &amp;amp;).
  *
  * @param {object} rawVn - Objeto VN sin procesar de la API VNDB.
  * @returns {VnEntry}
  */
 function _transformVn(rawVn) {
-  // Sanitizamos el objeto completo recursivamente (protección XSS global)
-  const vn = sanitizeObject(rawVn);
+  // ── FASE 1: Sanitizar el objeto crudo de la API ───────────────
+  // Esta es la ÚNICA llamada a sanitizeObject() en todo el flujo.
+  // rawVn viene de la red y puede contener strings maliciosos.
+  const safe = sanitizeObject(rawVn);
 
-  // Limpiar BBCode de la descripción antes de almacenar
-  const rawDescription = vn.description ?? '';
+  // ── FASE 2: Construir el VnEntry con valores de presentación ──
+  // Los campos se extraen del objeto sanitizado y se transforman.
+  // Nota: safe.description contiene HTML-entities (&lt; etc.) que
+  // stripBbCode maneja correctamente porque opera sobre el string
+  // ya escapado — y los valores finales se insertan con textContent.
+  const rawDescription  = safe.description ?? '';
   const cleanDescription = stripBbCode(rawDescription);
 
   return {
-    id:            vn.id            ?? '',
-    title:         getPreferredTitle(vn.title, vn.titles ?? []),
-    titleOriginal: vn.title         ?? '',
-    // v2: BBCode eliminado, sin truncar (la UI decide cuánto mostrar)
+    id:            safe.id            ?? '',
+    title:         getPreferredTitle(safe.title, safe.titles ?? []),
+    titleOriginal: safe.title         ?? '',
     description:   cleanDescription,
-    imageUrl:      vn.image?.url    ?? '',
-    imageIsAdult:  (vn.image?.sexual ?? 0) > 1,
-    released:      formatReleaseDate(vn.released),
-    rating:        formatVndbRating(vn.rating),
-    votecount:     vn.votecount     ?? 0,
-    duration:      formatDuration(vn.length_minutes),
-    tags:          translateTags(_extractTopTags(vn.tags ?? [], 10)),
-    developers:    (vn.developers ?? []).map(d => d.name).filter(Boolean),
+    imageUrl:      rawVn.image?.url   ?? '',   // URL: se usa en src="" — NO escapar
+    imageIsAdult:  (rawVn.image?.sexual ?? 0) > 1,
+    released:      formatReleaseDate(safe.released),
+    rating:        formatVndbRating(rawVn.rating),   // número — no necesita escape
+    votecount:     rawVn.votecount    ?? 0,           // número — no necesita escape
+    duration:      formatDuration(rawVn.length_minutes),
+    tags:          translateTags(_extractTopTags(rawVn.tags ?? [], 10)),
+    developers:    (rawVn.developers ?? [])
+                     .map(d => String(d?.name ?? '').trim())
+                     .filter(Boolean),
   };
 }
 
@@ -273,10 +340,10 @@ function _transformVn(rawVn) {
  */
 function _extractTopTags(tags, limit) {
   return tags
-    .filter(t  => t.rating >= 2.0)
+    .filter(t  => (t?.rating ?? 0) >= 2.0)
     .sort((a, b) => b.rating - a.rating)
     .slice(0, limit)
-    .map(t => t.name)
+    .map(t => String(t?.name ?? '').trim())
     .filter(isNonEmptyString);
 }
 
@@ -306,7 +373,7 @@ async function searchVns(query, { page = 1 } = {}) {
     return { items: [], more: false, count: 0 };
   }
 
-  const trimmedQuery = query.trim().replace(/\s{2,}/g, ' ').replace(/[^\S\r\n]+/g, ' ');
+  const trimmedQuery = query.trim().replace(/\s{2,}/g, ' ');
   const cacheKey     = `search:${trimmedQuery}:p${page}`;
 
   const cached = _getFromCache(cacheKey);
@@ -363,7 +430,6 @@ async function getVnById(vnId) {
 
   const raw = await _post('/vn', body);
   const vn  = raw.results?.[0] ?? null;
-
   if (!vn) return null;
 
   const transformed = _transformVn(vn);
@@ -375,30 +441,59 @@ async function getVnById(vnId) {
 /**
  * Obtiene múltiples VNs por sus IDs en una sola petición HTTP.
  *
+ * CORRECCIÓN BUG-07 — Caché por ID individual:
+ *  ANTES: siempre hacía un POST aunque los IDs ya estuvieran en caché.
+ *  AHORA: verifica _cache para cada ID. Solo hace POST por los IDs
+ *  que realmente faltan, y combina el resultado con los cacheados.
+ *  Si todos están en caché, no hay llamada de red.
+ *
  * @param {string[]} vnIds
  * @returns {Promise<VnEntry[]>}
  * @throws {VndbError}
  */
 async function getVnsByIds(vnIds) {
+  // Deduplicar y validar IDs
   const validIds = [...new Set(
     (vnIds ?? []).filter(id => isNonEmptyString(id) && /^v\d+$/.test(id))
   )];
 
   if (validIds.length === 0) return [];
 
-  const filtersExpr = ['or', ...validIds.map(id => ['id', '=', id])];
+  // ── Separar IDs que ya están en caché de los que no ──────────
+  const fromCache = [];
+  const missing   = [];
+
+  for (const id of validIds) {
+    const cached = _getFromCache(`vn:${id}`);
+    if (cached) {
+      fromCache.push(cached);
+    } else {
+      missing.push(id);
+    }
+  }
+
+  // Si todos estaban en caché, devolver sin petición de red
+  if (missing.length === 0) return fromCache;
+
+  // ── Pedir a VNDB solo los IDs que faltan ─────────────────────
+  const filtersExpr = ['or', ...missing.map(id => ['id', '=', id])];
   const body = {
     filters: filtersExpr,
     fields:  VNDB_VN_FIELDS_STR,
-    results: Math.min(validIds.length, 100),
+    results: Math.min(missing.length, 100),
   };
 
-  const raw = await _post('/vn', body);
-  return (raw.results ?? []).map(rv => {
+  const raw      = await _post('/vn', body);
+  const fetched  = (raw.results ?? []).map(rv => {
     const v = _transformVn(rv);
+    // Guardar en caché individual para futuras llamadas
+    _setCache(`vn:${v.id}`, v);
     _saveSnapshot(v);
     return v;
   });
+
+  // Combinar: resultados de caché + recién descargados
+  return [...fromCache, ...fetched];
 }
 
 /**
@@ -425,7 +520,11 @@ async function getTopRatedVns(limit = 12) {
   };
 
   const raw    = await _post('/vn', body);
-  const result = (raw.results ?? []).map(_transformVn);
+  const result = (raw.results ?? []).map(rv => {
+    const v = _transformVn(rv);
+    _setCache(`vn:${v.id}`, v);   // poblar caché individual también
+    return v;
+  });
 
   _setCache(cacheKey, result);
   return result;

@@ -2,28 +2,6 @@
    VN-HUB — Hoja de estilos principal
    Diseño: Soft Romantic · Rosa · Celeste · Glassmorphism
    Modo oscuro: Noir · Rojo · Dorado · Profundidad
-
-   ÍNDICE
-   ──────
-    1. Variables (Design Tokens)
-    2. Reset y base tipográfica
-    3. Layout
-    4. Header
-    5. Navegación principal
-    6. Sección header interior
-    7. Buscador
-    8. Grid de cards
-    9. Card de VN
-   10. Badges de estado
-   11. Menú flotante de estado
-   12. Sistema de pestañas
-   13. Estado vacío
-   14. Paginación
-   15. Botones genéricos
-   16. Toast de notificaciones
-   17. Animaciones
-   18. Responsive
-   19. Accesibilidad
 ──────────────────────────────────────────────────────────────── */
 
 
@@ -33,35 +11,6 @@
 ──────────────────────────────────────────────────────────────── */
 
 :root {
-  /*
-   * ── MODO CLARO v3: inspirado en la estética de VNDB.org ──
-   *
-   * VNDB usa una paleta clínica y limpia: blanco puro como base,
-   * grises azulados muy apagados para superficies, un único acento
-   * cromático medio y texto casi negro. No tiene gradientes llamativos
-   * ni saturación alta — todo es legible y descansado.
-   *
-   * Traducción para VN-Hub (conservando blanco · rosa · rojo · celeste):
-   *
-   *  · Base:     blanco puro #ffffff con superficies gris-rosado muy sutil.
-   *              No hay tinte morado ni lila en el fondo.
-   *
-   *  · Rosa:     usado SOLO como acento, en tono medio-apagado #c0627a.
-   *              Botones, links, focus. No tiñe el fondo.
-   *
-   *  · Rojo:     reservado para danger y badge "dropped". #c0392b clásico,
-   *              legible y sin agresividad en fondos claros.
-   *
-   *  · Celeste:  acento secundario en tono slate #5b8fa8.
-   *              Complementa el rosa sin competir.
-   *
-   *  · Texto:    #1a1a1a sobre blanco — contraste WCAG AAA.
-   *
-   *  · Bordes:   grises finos, sin color. Estructuran sin decorar.
-   *
-   *  · Sin gradientes atmosféricos agresivos: solo un toque muy sutil.
-   */
-
   /* Fondos */
   --vh-bg-base:        #f5f5f5;
   --vh-bg-surface:     #ffffff;
@@ -69,8 +18,6 @@
   --vh-bg-card:        #ffffff;
   --vh-bg-overlay:     rgba(245, 245, 245, 0.97);
 
-  /* Gradiente del body: casi plano, un toque mínimo de rosa y celeste
-   * en las esquinas. Opacidades ≤ 0.06 — atmósfera sin protagonismo. */
   --vh-body-bg-color:  #f5f5f5;
   --vh-body-gradient:
     radial-gradient(ellipse at 0%   0%,   rgba(192,  98, 122, 0.06) 0%, transparent 45%),
@@ -168,10 +115,6 @@
   --vh-bg-card:        rgba(22, 11, 16, 0.90);
   --vh-bg-overlay:     rgba(10, 6, 8, 0.96);
 
-  /*
-   * Gradiente noir con manchas de rojo y dorado — mismo sistema
-   * que el CSS de referencia pero en la paleta oscura del proyecto.
-   */
   --vh-body-bg-color:  #0a0608;
   --vh-body-gradient:
     radial-gradient(ellipse at 20% 25%, rgba(220, 38,  38,  0.24) 0%, transparent 50%),
@@ -261,19 +204,6 @@ html {
   scroll-behavior: smooth;
 }
 
-/*
- * El body ES el lienzo del diseño.
- *
- * TÉCNICA DE TRANSICIÓN DE FONDO:
- * background-image no es animable en CSS. Para lograr la transición
- * suave entre el gradiente rosa (light) y el gradiente rojo/dorado (dark)
- * usamos un pseudo-elemento ::before que contiene el gradiente del dark mode.
- * En light mode su opacity es 0; al activar [data-theme="dark"] sube a 1.
- * Esto permite animar con opacity en lugar de background-image.
- *
- * background-attachment: fixed mantiene el gradiente estático
- * mientras el contenido scrollea — efecto de profundidad real.
- */
 body {
   font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
   background-color: var(--vh-body-bg-color);
@@ -288,11 +218,6 @@ body {
     color            var(--vh-transition-slow);
 }
 
-/*
- * Capa del gradiente oscuro superpuesta.
- * opacity: 0 en light → opacity: 1 en dark.
- * La transición de opacity ES animable — resuelve el problema.
- */
 body::before {
   content: '';
   position: fixed;

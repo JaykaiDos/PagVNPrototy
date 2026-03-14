@@ -686,7 +686,34 @@ const LazyImageManager = (() => {
   let _observer = null;
 
   /**
+   * Reemplaza una imagen que falló por un placeholder div controlado.
+   * Actúa como segunda línea de defensa tras el onerror de render-engine.
+   *
+   * CUÁNDO se ejecuta este handler (y no el de render-engine):
+   *  - La imagen entró al viewport DESPUÉS de ser creada por render-engine.
+   *  - El onerror de render-engine ya se disparó y replaceChild fue llamado.
+   *  - En ese caso, `img.parentNode` ya es null → esta función es un no-op seguro.
+   *  - Si por alguna razón render-engine no registró su onerror, este actúa.
+   *
+   * @param {HTMLImageElement} img
+   */
+  function _handleImageError(img) {
+    // Si render-engine ya reemplazó la imagen, parentNode es null → salir
+    if (!img.parentNode) return;
+
+    const placeholder = document.createElement('div');
+    placeholder.className   = `${img.className} vh-card__cover-placeholder vh-card__cover-placeholder--error`;
+    placeholder.textContent = '📖';
+    placeholder.setAttribute('role', 'img');
+    placeholder.setAttribute('aria-label', 'Imagen no disponible');
+
+    img.parentNode.replaceChild(placeholder, img);
+  }
+
+  /**
    * Callback del IntersectionObserver.
+   * Se ejecuta cuando una imagen entra al viewport.
+   *
    * @param {IntersectionObserverEntry[]} entries
    */
   function _onIntersect(entries) {
@@ -695,66 +722,71 @@ const LazyImageManager = (() => {
 
       const img = entry.target;
 
-      // Si ya está cargada, solo añadir clase
-      if (img.complete) {
+      // Dejar de observar inmediatamente — ya entró al viewport
+      _observer?.unobserve(img);
+
+      // Si ya cargó (estaba en caché), añadir clase directamente
+      if (img.complete && img.naturalWidth > 0) {
         img.classList.add('is-loaded');
-        _observer?.unobserve(img);
         return;
       }
 
+      // Si ya falló (naturalWidth === 0 y complete === true)
+      if (img.complete && img.naturalWidth === 0) {
+        _handleImageError(img);
+        return;
+      }
+
+      // Imagen aún cargando — registrar handlers
       img.addEventListener('load', () => {
         img.classList.add('is-loaded');
       }, { once: true });
 
       img.addEventListener('error', () => {
-        img.classList.add('is-loaded'); // mostrar placeholder aunque falle
+        _handleImageError(img);
       }, { once: true });
-
-      _observer?.unobserve(img);
     });
   }
 
   return {
     /**
-     * Inicializa el observer y observa todas las imágenes de cards.
-     * Debe llamarse tras renderizar cada lote de cards.
+     * Inicializa el IntersectionObserver para el fade-in de imágenes.
      *
      * PROGRESSIVE ENHANCEMENT:
-     * La clase 'js-lazy-active' en el body es la condición que activa
-     * el CSS de fade-in (opacity: 0 → 1). Si este método nunca se ejecuta
-     * — por fallo de JS, falta de IntersectionObserver, etc. — las imágenes
-     * permanecen visibles con su comportamiento nativo. Sin la clase, el CSS
-     * de vn-hub-mobile.css no aplica opacity: 0, evitando imágenes invisibles.
+     * La clase 'js-lazy-active' activa el CSS de fade-in (opacity: 0 → 1).
+     * Si IntersectionObserver no está disponible, las imágenes son visibles
+     * con comportamiento nativo — nunca quedan invisibles.
      */
     init() {
       if (!window.IntersectionObserver) return;
 
-      // Activar el fade-in CSS solo cuando el JS está confirmado como operativo.
-      // DEBE ir antes de crear el observer para que las imágenes ya en viewport
-      // se procesen correctamente en la primera llamada a observeAll().
+      // Activar fade-in CSS solo cuando JS está operativo
       document.body.classList.add('js-lazy-active');
 
       _observer = new IntersectionObserver(_onIntersect, {
-        rootMargin: '100px 0px', // precargar 100px antes de que entre al viewport
-        threshold: 0.01,
+        rootMargin: '100px 0px', // precargar 100px antes del viewport
+        threshold:  0.01,
       });
 
       this.observeAll();
     },
 
     /**
-     * Observa todas las imágenes de cards que aún no tienen la clase is-loaded.
-     * Llamar tras cada render de cards nuevas.
+     * Observa todas las imágenes lazy de cards que aún no cargaron.
+     * Llamar tras cada render de nuevas cards.
      */
     observeAll() {
       if (!_observer) return;
-      const imgs = document.querySelectorAll('.vh-card__cover[loading="lazy"]:not(.is-loaded)');
+      const imgs = document.querySelectorAll(
+        '.vh-card__cover[loading="lazy"]:not(.is-loaded)'
+      );
       imgs.forEach(img => _observer.observe(img));
     },
 
     destroy() {
       _observer?.disconnect();
       _observer = null;
+      document.body.classList.remove('js-lazy-active');
     },
   };
 })();

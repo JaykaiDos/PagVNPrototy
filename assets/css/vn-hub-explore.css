@@ -1,19 +1,7 @@
 /* ════════════════════════════════════════════════════════════════
    VN-HUB — Módulo de Exploración Rápida (v6)
-   Archivo: assets/css/vn-hub-explore.css
-   Importar DESPUÉS de vn-hub.css y vn-hub-components.css
-
    ÍNDICE
    ──────
-    1. Autocompletado de búsqueda
-    2. Panel de exploración (vep-panel)
-    3. Accesos rápidos (vep-quick)
-    4. Filtro de año (vep-year)
-    5. Botonera de etiquetas (vep-tags)
-    6. Lógica AND/OR
-    7. Barra de estado activo (vep-status)
-    8. Animaciones
-    9. Responsive
 ════════════════════════════════════════════════════════════════ */
 
 
@@ -697,10 +685,7 @@
 
 
 /* ────────────────────────────────────────────────────────────────
-   MODO OSCURO — sobrescrituras de tokens
-   Los colores se toman de las variables CSS del dark mode
-   definidas en vn-hub.css. Solo se necesitan ajustes puntuales
-   donde el contraste lo requiera.
+   MODO OSCURO
 ──────────────────────────────────────────────────────────────── */
 
 [data-theme="dark"] .vep-panel {

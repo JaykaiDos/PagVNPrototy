@@ -1,35 +1,12 @@
 /* ────────────────────────────────────────────────────────────────
    VN-HUB — Módulo de Exportación de Listas
-   Archivo: assets/css/vn-hub-export.css
-
-   DESCRIPCIÓN:
-    Estilos para el botón "Exportar como imagen" y su modal de
-    progreso/confirmación. Sigue el mismo sistema de design tokens
-    (variables CSS) definido en vn-hub.css para garantizar
-    consistencia visual en ambos temas (light / dark).
-
-   ÍNDICE:
-    1. Botón de exportación (por tab/sección)
-    2. Modal de exportación (overlay + panel)
-    3. Contenido interno del modal
-    4. Barra de progreso animada
-    5. Acciones del modal
-    6. Variantes por estado (colores de acento)
-    7. Animaciones
-    8. Responsive
 ──────────────────────────────────────────────────────────────── */
 
 
 /* ────────────────────────────────────────────────────────────────
    1. BOTÓN DE EXPORTACIÓN
-   Se coloca en el header interno de cada sección/tab.
-   Diseño: botón outline pequeño con icono de cámara/compartir.
 ──────────────────────────────────────────────────────────────── */
 
-/**
- * Contenedor de acciones de la sección (contiene el botón exportar).
- * Se posiciona a la derecha del título de la sección.
- */
 .vh-section-actions {
   display:      flex;
   align-items:  center;
@@ -37,11 +14,6 @@
   flex-shrink:  0;
 }
 
-/**
- * Botón de exportación principal.
- * Estado base: outline con el color de acento.
- * Hover: relleno sólido.
- */
 .vh-btn-export {
   display:        inline-flex;
   align-items:    center;

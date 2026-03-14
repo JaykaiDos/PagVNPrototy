@@ -2,34 +2,30 @@
 
 /**
  * @file js/app-init.js
- * @description Punto de entrada de VN-Hub.
+ * @description Punto de entrada único de VN-Hub.
  *              Orquesta la inicialización de todos los módulos en orden.
  *
- * CORRECCIONES v2:
- *  - [BUG #2] FirebaseSync._onStoreEvent 'update': Cuando una entrada pasa
- *    a estado 'finished' con score/review, ahora también sincroniza el feed
- *    público (publishToFeed). Previamente solo guardaba en users/{uid}/library.
- *  - [BUG #3] FirebaseSync._onStoreEvent 'update': Cuando una entrada SALE
- *    de estado 'finished', ahora llama a removeFromFeed() para que la reseña
- *    desaparezca de la comunidad. Antes permanecía visible indefinidamente.
- *  - [BUG #1] Tras cualquier operación que modifica el feed, se llama a
- *    FeedController.notifyReviewPublished() para invalidar el caché y forzar
- *    recarga inmediata si el feed está visible.
+ * CORRECCIÓN v3 — UiController.init is not a function:
  *
- * NOVEDAD v7 — Sistema Mobile:
- *  - Paso 8 del bootstrap inicializa MobileNavManager, SwipeNavigator,
- *    PullToRefresh y LazyImageManager desde mobile-gestures.js.
- *  - Cada módulo falla de forma aislada (no bloquea los demás).
+ *  ui-controller.js NO exporta init(). Su inicialización ocurre mediante
+ *  un bloque auto-init al final del módulo (patrón DOMContentLoaded).
+ *  Llamar UiController.init() desde aquí lanzaba TypeError.
  *
- * ORDEN DE ARRANQUE:
- *  1. LibraryStore.init()      — Carga biblioteca desde localStorage
- *  2. ThemeManager.init()      — Aplica tema guardado
- *  3. AuthController.init()    — Activa Auth Firebase y renderiza header
- *  4. FirebaseSync.init()      — Suscribe el store a Firebase para sync automático
- *  5. FeedController.init()    — Registra eventos de navegación del feed
- *  6. ProfileController.init() — Inicializa vista de perfil
- *  7. (debug)                  — Log de store events en localhost
- *  8. MobileSystem.init()      — Hamburger, bottom nav, swipe, PTR, lazy images
+ *  explore-controller.js SÍ exporta init(), pero también tiene auto-init
+ *  propio. Llamarlo explícitamente causaba doble inicialización (el mensaje
+ *  "[ExploreController] inicializado" aparecía dos veces en consola).
+ *
+ *  SOLUCIÓN: Para módulos con auto-init propio, basta con importarlos.
+ *  El navegador evalúa el módulo al importarlo, ejecutando el auto-init.
+ *  No se necesita llamar ninguna función adicional desde aquí.
+ *
+ *  MÓDULOS CON AUTO-INIT (solo importar, no llamar init()):
+ *    - ui-controller.js      → init() interna, no exportada
+ *    - explore-controller.js → init() exportada, pero tiene auto-init propio
+ *
+ *  MÓDULOS SIN AUTO-INIT (llamar init() explícitamente desde bootstrap):
+ *    - LibraryStore, ThemeManager, AuthController, FirebaseSync
+ *    - FeedController, ProfileController, MobileSystem
  *
  * FILOSOFÍA:
  *  - Este archivo NO contiene lógica de negocio.
@@ -42,6 +38,12 @@ import * as FeedController    from './feed-controller.js';
 import * as LibraryStore      from './library-store.js';
 import * as AuthController    from './auth-controller.js';
 import * as FirebaseService   from './firebase-service.js';
+
+// Importados para forzar su carga y ejecutar su auto-init interno.
+// NO se llama ningún método sobre ellos — se auto-inicializan solos.
+import './ui-controller.js';
+import './explore-controller.js';
+
 import {
   SwipeNavigator,
   PullToRefresh,
@@ -87,37 +89,14 @@ const ThemeManager = {
 
 // ════════════════════════════════════════════════════════
 // 2. FIREBASE SYNC
-//    Escucha mutaciones del LibraryStore y las replica
-//    en Firestore si hay sesión activa.
-//
-//    DISEÑO:
-//    - Ni LibraryStore ni FirebaseService se conocen entre sí.
-//    - Este módulo actúa como el puente (Mediator pattern).
-//    - También mantiene sincronizado el feed /feed/{uid_vnId}.
 // ════════════════════════════════════════════════════════
 
 const FirebaseSync = {
 
-  /**
-   * Suscribe el Observer del store para sincronizar
-   * cada mutación con Firestore en segundo plano.
-   */
   init() {
     LibraryStore.subscribe(this._onStoreEvent.bind(this));
   },
 
-  /**
-   * Callback del Observer del LibraryStore.
-   * Se ejecuta tras cada add/update/remove en el store local.
-   *
-   * GARANTÍAS:
-   *  - Solo actúa si hay usuario autenticado.
-   *  - Los errores son silenciosos para el usuario (la app sigue con localStorage).
-   *  - Mantiene sincronizados TANTO users/{uid}/library COMO /feed.
-   *
-   * @param {'add'|'update'|'remove'|'error'} event
-   * @param {object|null} payload — LibraryEntry o { vnId } según el evento
-   */
   async _onStoreEvent(event, payload) {
     if (!FirebaseService.isAuthenticated()) return;
 
@@ -127,32 +106,19 @@ const FirebaseSync = {
         case 'add':
         case 'update': {
           if (!payload?.vnId) return;
-
           const entry = LibraryStore.getEntry(payload.vnId);
           if (!entry) return;
-
-          // ── Paso 1: Siempre sincronizar la biblioteca personal ──────────
           await FirebaseService.saveLibraryEntry(payload.vnId, entry);
           console.info(`[FirebaseSync] Biblioteca actualizada: "${payload.vnId}".`);
-
-          // ── Paso 2: Sincronizar el feed público ─────────────────────────
-          // [CORRECCIÓN BUG #2 y #3]
           await this._syncFeed(entry);
           break;
         }
 
         case 'remove': {
           if (!payload?.vnId) return;
-
-          // Eliminar de la biblioteca personal
           await FirebaseService.deleteLibraryEntry(payload.vnId);
-
-          // Eliminar del feed público (si tenía reseña publicada)
           await FirebaseService.removeFromFeed(payload.vnId);
-
-          // Invalidar caché del feed para reflejar la eliminación
           await FeedController.notifyReviewPublished();
-
           console.info(`[FirebaseSync] Eliminada "${payload.vnId}" de biblioteca y feed.`);
           break;
         }
@@ -166,37 +132,7 @@ const FirebaseSync = {
     }
   },
 
-  /**
-   * [CORRECCIÓN BUG #3 — revisado]
-   * Gestiona la sincronización del feed cuando el store detecta un cambio.
-   *
-   * RESPONSABILIDAD ÚNICA DE ESTE MÉTODO:
-   *  → Solo retira entradas del feed cuando la VN deja de estar en 'finished'.
-   *  → NUNCA publica ni actualiza el feed desde aquí.
-   *
-   * DISEÑO DELIBERADO — Por qué NO se llama publishToFeed() aquí:
-   *
-   *  1. FALTA DE DATOS: El LibraryStore solo guarda vnId, score y review.
-   *     No guarda vnTitle ni vnImageUrl (metadatos de VNDB). Las Security Rules
-   *     de Firestore exigen isValidString(vnTitle, 300) en el create, por lo que
-   *     un intento de publicación sin título falla con "Missing or insufficient
-   *     permissions". El único contexto con esos datos es modal-review.js.
-   *
-   *  2. AUTORIDAD DE PUBLICACIÓN: modal-review._handleSave() es el punto
-   *     canónico de publicación. Llamar publishToFeed() desde dos lugares
-   *     genera doble escritura y errores de permisos en el 100% de los casos
-   *     donde el doc aún no existe en /feed (no hay vnTitle).
-   *
-   *  3. FLUJO CORRECTO: modal-review → publishToFeed → notifyReviewPublished.
-   *     FirebaseSync → solo removeFromFeed si status ≠ finished.
-   *
-   * @param {import('./library-store.js').LibraryEntry} entry
-   * @returns {Promise<void>}
-   */
   async _syncFeed(entry) {
-    // Solo actuar cuando la VN sale del estado 'finished'.
-    // En cualquier otro caso (finished→finished con datos actualizados),
-    // modal-review ya habrá llamado publishToFeed() directamente.
     if (entry.status !== VN_STATUS.FINISHED) {
       await FirebaseService.removeFromFeed(entry.vnId);
       await FeedController.notifyReviewPublished();
@@ -204,23 +140,15 @@ const FirebaseSync = {
         `[FirebaseSync] Reseña de "${entry.vnId}" retirada del feed (estado: ${entry.status}).`
       );
     }
-    // Si status === FINISHED → no hacer nada aquí.
-    // modal-review._handleSave() es el responsable de publishToFeed().
   },
 };
 
 
 // ════════════════════════════════════════════════════════
-// 3. MOBILE SYSTEM (v7)
-//    Agrupa la inicialización de todos los módulos táctiles.
-//    Separado en su propia sección para claridad y aislamiento.
+// 3. MOBILE SYSTEM
 // ════════════════════════════════════════════════════════
 
-/**
- * IDs de los botones de navegación en el orden deseado para el swipe.
- * El orden aquí es el orden de navegación izquierda→derecha.
- * @type {string[]}
- */
+/** IDs de los botones de navegación en orden izquierda→derecha. */
 const NAV_VIEW_IDS = ['navSearch', 'navLibrary', 'navFeed', 'navProfile'];
 
 /**
@@ -233,45 +161,28 @@ function _getActiveViewId() {
 
 /**
  * Inicializa todos los módulos del sistema mobile.
- * Se ejecuta como paso 8 del bootstrap, DESPUÉS de que todos
- * los controladores estén listos (nav items pueden estar ocultos
- * hasta que AuthController renderice el header).
- *
- * Cada sub-módulo falla de forma aislada.
+ * Ejecutado con requestAnimationFrame para garantizar DOM pintado.
  */
 function _initMobileSystem() {
 
-  // ── 8a. MobileNavManager ─────────────────────────────────────
-  // Inyecta hamburger, overlay del drawer y bottom nav bar.
-  // Gestiona apertura/cierre del drawer con foco de accesibilidad.
   try {
     MobileNavManager.init();
-
-    // Sincronizar el bottom bar cuando ui-controller cambia de vista
     document.querySelectorAll('.vh-nav__btn').forEach(btn => {
       btn.addEventListener('click', () => {
         MobileNavManager.syncActiveView(btn.dataset.view ?? '');
       });
     });
-
-    // Sincronizar el estado inicial (la vista activa al arrancar es "search")
     MobileNavManager.syncActiveView(_getActiveViewId());
-
   } catch (err) {
     console.error('[VN-Hub] Error al inicializar MobileNavManager:', err);
   }
 
-  // ── 8b. SwipeNavigator ───────────────────────────────────────
-  // Swipe horizontal izquierda/derecha para cambiar entre vistas.
-  // Solo activo en dispositivos táctiles y sin prefers-reduced-motion.
   try {
     SwipeNavigator.init({
       views:       NAV_VIEW_IDS,
-      threshold:   60,   // px mínimos para registrar swipe
-      maxVertical: 80,   // px máximos de desviación vertical permitida
+      threshold:   60,
+      maxVertical: 80,
       onSwipe: (_direction, viewBtnId) => {
-        // El SwipeNavigator ya disparó el click en el botón;
-        // aquí solo sincronizamos el estado visual del bottom bar.
         const viewId = document.getElementById(viewBtnId)?.dataset?.view ?? '';
         MobileNavManager.syncActiveView(viewId);
       },
@@ -280,58 +191,32 @@ function _initMobileSystem() {
     console.error('[VN-Hub] Error al inicializar SwipeNavigator:', err);
   }
 
-  // ── 8c. PullToRefresh ────────────────────────────────────────
-  // Pull-down desde el tope de la página para recargar la vista activa.
-  // El callback determina qué acción realizar según la vista visible.
   try {
     PullToRefresh.init({
-      threshold: 80,   // px de arrastre necesarios para activar
-      maxPull:   120,  // px máximos de arrastre visual
-
-      /**
-       * Callback ejecutado cuando el usuario completa el pull.
-       * Recarga la vista activa de forma específica por tipo.
-       * @returns {Promise<void>}
-       */
+      threshold: 80,
+      maxPull:   120,
       onRefresh: async () => {
         const activeViewId = _getActiveViewId();
-
         switch (activeViewId) {
           case 'search': {
-            // Re-disparar la búsqueda o exploración activa
             const searchInput = document.getElementById('searchInput');
             if (searchInput?.value?.trim()) {
               searchInput.dispatchEvent(new Event('input', { bubbles: true }));
             } else {
-              // Si no hay búsqueda activa, re-disparar el filtro de exploración activo
-              const activeExploreBtn = document.querySelector('.vep-quick__btn[aria-pressed="true"]');
-              activeExploreBtn?.click();
+              document.querySelector('.vep-quick__btn[aria-pressed="true"]')?.click();
             }
             break;
           }
-
-          case 'library': {
-            // El store ya es reactivo; emitir un evento artificial de refresh
-            // para que render-engine re-pinte la vista.
+          case 'library':
             document.dispatchEvent(new CustomEvent('vnh:library:refresh'));
             break;
-          }
-
-          case 'feed': {
-            // Invalidar caché y forzar recarga del feed
+          case 'feed':
             await FeedController.notifyReviewPublished?.();
             break;
-          }
-
-          case 'profile': {
-            // Forzar recarga del perfil re-renderizando el componente
+          case 'profile':
             document.dispatchEvent(new CustomEvent('vnh:profile:refresh'));
             break;
-          }
         }
-
-        // Tiempo mínimo de feedback visual para que el spinner no desaparezca
-        // de forma abrupta en cargas rápidas (localStorage/cache)
         await new Promise(resolve => setTimeout(resolve, 500));
       },
     });
@@ -339,14 +224,8 @@ function _initMobileSystem() {
     console.error('[VN-Hub] Error al inicializar PullToRefresh:', err);
   }
 
-  // ── 8d. LazyImageManager ─────────────────────────────────────
-  // Observa imágenes con loading="lazy" y aplica fade-in suave al
-  // entrar al viewport. Llamar observeAll() tras cada render de cards.
   try {
     LazyImageManager.init();
-
-    // Re-observar tras cada render de cards nuevo
-    // render-engine.js debe disparar este evento tras renderizar
     document.addEventListener('vnh:cards:rendered', () => {
       LazyImageManager.observeAll();
     });
@@ -363,10 +242,21 @@ function _initMobileSystem() {
 /**
  * Inicializa todos los módulos en orden.
  * Cada paso está en try/catch independiente para resiliencia.
+ *
+ * ORDEN:
+ *  1. LibraryStore      — fuente de verdad local, siempre primero
+ *  2. ThemeManager      — evita FOUC antes del primer paint
+ *  3. AuthController    — renderiza el header
+ *  4. FirebaseSync      — se suscribe al store
+ *  5. FeedController    — feed de comunidad
+ *  6. ProfileController — perfil de usuario
+ *  NOTA: ui-controller y explore-controller ya corrieron su auto-init
+ *        al ser evaluados por el import al inicio de este archivo.
+ *  7. Mobile system     — requiere DOM pintado → requestAnimationFrame
  */
 function _bootstrap() {
 
-  // ── 1. Biblioteca local (CRÍTICO: debe ser primero)
+  // ── 1. Biblioteca local
   try {
     LibraryStore.init();
   } catch (err) {
@@ -380,14 +270,14 @@ function _bootstrap() {
     console.error('[VN-Hub] Error al aplicar tema:', err);
   }
 
-  // ── 3. Auth Controller (Firebase Auth + render del header)
+  // ── 3. Auth Controller
   try {
     AuthController.init();
   } catch (err) {
     console.error('[VN-Hub] Error al inicializar AuthController:', err);
   }
 
-  // ── 4. Sincronización automática store → Firestore
+  // ── 4. Firebase Sync
   try {
     FirebaseSync.init();
   } catch (err) {
@@ -414,6 +304,8 @@ function _bootstrap() {
       console.debug(`[LibraryStore] ${event}:`, payload?.vnId ?? payload);
     });
   }
+
+  // ── 8. Sistema mobile (requiere DOM completamente pintado)
   requestAnimationFrame(() => {
     _initMobileSystem();
   });

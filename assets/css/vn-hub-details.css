@@ -1,9 +1,6 @@
 /* ────────────────────────────────────────────────────────────────
    VN-HUB DETAILS — Estilos exclusivos de novel-details.html
-   v2: Correcciones
-    - Hero: fondo con color sólido de fallback + transición opacity
-      (elimina el "negro infinito" cuando la imagen tarda en cargar)
-    - Links de cards: reset del color azul nativo del navegador
+   v4: Correcciones
 ──────────────────────────────────────────────────────────────── */
 
 
@@ -63,11 +60,6 @@
   display: flex;
   align-items: flex-end;
 
-  /*
-   * FIX v2: color de fallback mientras carga la imagen.
-   * En modo oscuro usamos el fondo de superficie; en claro un tono gris-azulado.
-   * Esto evita el cuadro negro vacío que se veía antes de cargar la imagen.
-   */
   background-color: var(--vh-bg-surface);
 }
 
@@ -81,14 +73,11 @@
   opacity: 0;
   transition: opacity 0.6s ease;
   filter: blur(22px) brightness(0.45) saturate(1.2);
-  transform: scale(1.08); /* Evita bordes blancos del blur */
+  transform: scale(1.08);
   z-index: 0;
 }
 
-/*
- * FIX v2: clase que JS añade al #heroBg después de asignar background-image.
- * Desencadena el fade-in suave del fondo.
- */
+
 .vnd-hero__bg--loaded {
   opacity: 1;
 }
@@ -136,11 +125,6 @@
   font-size: 2.5rem;
 }
 
-/*
- * FIX: .vnd-hero__cover-skeleton tiene display:flex definido explícitamente.
- * Esto tiene mayor especificidad que el user-agent stylesheet [hidden]{display:none},
- * por lo que el atributo hidden del HTML no funciona sin esta regla.
- */
 .vnd-hero__cover-skeleton[hidden] { display: none !important; }
 
 .vnd-hero__cover-placeholder {
@@ -188,10 +172,7 @@
   flex-direction: column;
 }
 
-/*
- * FIX: igual que cover-skeleton — display:flex explícito requiere
- * regla [hidden] explícita para que JS pueda ocultarlo con hidden=true.
- */
+
 .vnd-hero__skeleton-block[hidden] { display: none !important; }
 
 .vnd-hero__title {
@@ -646,11 +627,7 @@
 
 
 /* ════════════════════════════════════════════════════════════════
-   10. LINK DE TÍTULO EN CARDS (render-engine.js)
-   FIX v2: reset del color azul nativo del navegador.
-   El <a> dentro de <h3.vh-card__title> hereda el color del h3,
-   que a su vez usa el color de texto de la card.
-   Se fuerza color: inherit en todos los contextos posibles.
+   10. LINK DE TÍTULO EN CARDS
 ════════════════════════════════════════════════════════════════ */
 
 .vh-card__title-link,

@@ -3,18 +3,6 @@
 /**
  * @file js/render-engine.js
  * @description Motor de renderizado de componentes UI para VN-Hub.
- *
- * CAMBIOS v3:
- *  - _buildTitleLink() convierte el título de cada card en un link
- *    que abre novel-details.html?id=vXX (Fase A del Mapa Maestro).
- *  - createVnCard() y createLibraryCard() usan _buildTitleLink()
- *    en lugar de _elText() para el h3 del título.
- *
- * CAMBIOS v2:
- *  - _buildLibraryFooter() agrega botones contextuales según estado:
- *    PLAYING  → botón "Editar bitácora"   (data-action="edit-log")
- *    FINISHED → botón "Editar reseña"     (data-action="edit-review")
- *    DROPPED  → botón "Editar comentario" (data-action="edit-comment")
  */
 
 import { VN_STATUS, VN_STATUS_META, SCORE_CATEGORIES }      from './constants.js';
@@ -26,7 +14,17 @@ import { getScoreThreshold, formatFinalScore as _fmtScore } from './score-engine
 // CONSTANTES INTERNAS
 // ─────────────────────────────────────────────
 
+/** Emoji placeholder cuando no hay imagen o la imagen falla. */
 const NO_IMAGE_PLACEHOLDER = '📖';
+
+/**
+ * Dimensiones estándar de portadas en VNDB.
+ * Declarar width/height evita layout shift (CLS) al reservar
+ * el espacio antes de que la imagen termine de descargar.
+ * El CSS controla las dimensiones visuales reales con object-fit.
+ */
+const COVER_WIDTH  = 200;
+const COVER_HEIGHT = 300;
 
 const STATUS_BADGE_CLASS = Object.freeze({
   [VN_STATUS.PENDING]:  'vh-badge--pending',
@@ -53,40 +51,94 @@ function _elText(tag, cls, text, attrs = {}) {
   return el;
 }
 
-function _safeImage(src, alt, cls) {
+/**
+ * Convierte un elemento <img> roto en un placeholder div controlado.
+ * Se llama desde el handler onerror de _safeImage().
+ *
+ * MOTIVO: cuando la URL de VNDB falla (404, red cortada, etc.), el
+ * navegador muestra su ícono de imagen rota nativo. Este helper lo
+ * reemplaza por un placeholder visual consistente con el diseño.
+ *
+ * @param {HTMLImageElement} img - La imagen que falló.
+ */
+function _applyImgPlaceholder(img) {
+  // Preservar las clases CSS de la imagen para mantener el layout
+  const cls = img.className;
+
+  const placeholder = document.createElement('div');
+  placeholder.className   = `${cls} vh-card__cover-placeholder vh-card__cover-placeholder--error`;
+  placeholder.textContent = NO_IMAGE_PLACEHOLDER;
+  placeholder.setAttribute('aria-label', 'Imagen no disponible');
+  placeholder.setAttribute('role', 'img');
+
+  // Reemplazar la imagen rota por el placeholder en el DOM
+  img.parentNode?.replaceChild(placeholder, img);
+}
+
+/**
+ * Crea un elemento de imagen seguro con fallback de error controlado.
+ *
+ * CORRECCIONES v4:
+ *  - PERF-03: handler onerror → reemplaza imagen rota por placeholder div.
+ *  - PERF-04: width/height declarados → reserva espacio, elimina CLS.
+ *  - PERF-05: fetchpriority="high" en las primeras cards → mejora LCP.
+ *
+ * Si src no es una URL válida (http/https), devuelve directamente
+ * el placeholder div sin intentar crear un <img>.
+ *
+ * @param {string}  src      - URL de la imagen.
+ * @param {string}  alt      - Texto alternativo.
+ * @param {string}  cls      - Clase CSS de la imagen.
+ * @param {boolean} [priority=false] - Si true, añade fetchpriority="high".
+ * @returns {HTMLElement} <img> o <div> placeholder.
+ */
+function _safeImage(src, alt, cls, priority = false) {
   const isValidSrc = typeof src === 'string' && /^https?:\/\//i.test(src);
 
   if (!isValidSrc) {
     const placeholder = _el('div', `${cls} vh-card__cover-placeholder`);
     placeholder.textContent = NO_IMAGE_PLACEHOLDER;
+    placeholder.setAttribute('role', 'img');
+    placeholder.setAttribute('aria-label', alt || 'Sin imagen');
     return placeholder;
   }
 
   const img = _el('img', cls);
   img.setAttribute('src',     src);
   img.setAttribute('alt',     alt);
-  img.setAttribute('loading', 'lazy');
-  img.setAttribute('decoding','async');
+  img.setAttribute('loading', priority ? 'eager' : 'lazy');
+  img.setAttribute('decoding', 'async');
+
+  // PERF-04: reservar espacio para evitar CLS
+  img.setAttribute('width',  String(COVER_WIDTH));
+  img.setAttribute('height', String(COVER_HEIGHT));
+
+  // PERF-05: prioridad alta solo en primeras cards (above the fold)
+  if (priority) {
+    img.setAttribute('fetchpriority', 'high');
+  }
+
+  // PERF-03: fallback controlado si la imagen falla
+  img.addEventListener('error', () => _applyImgPlaceholder(img), { once: true });
+
   return img;
 }
 
 /**
  * Construye un <a> con el título de la VN que enlaza a novel-details.html.
- * Usado dentro del <h3> de cada card (búsqueda y biblioteca).
  *
  * SEGURIDAD: usa textContent (nunca innerHTML) para el texto del título.
  * El vnId ya viene validado del servicio VNDB (/^v\d+$/).
  *
- * @param {string} vnId   - ID de VNDB en formato "v{número}" (ej: "v17").
- * @param {string} title  - Título de la VN. Se inserta con textContent.
+ * @param {string} vnId
+ * @param {string} title
  * @returns {HTMLAnchorElement}
  */
 function _buildTitleLink(vnId, title) {
   const link = document.createElement('a');
-  link.href      = `novel-details.html?id=${encodeURIComponent(vnId)}`;
-  link.className = 'vh-card__title-link';
+  link.href        = `novel-details.html?id=${encodeURIComponent(vnId)}`;
+  link.className   = 'vh-card__title-link';
   link.setAttribute('aria-label', `Ver detalles de ${title}`);
-  // textContent escapa automáticamente: seguro contra XSS
   link.textContent = title;
   return link;
 }
@@ -116,7 +168,8 @@ function createStatusBadge(status) {
 /**
  * Crea una card para el grid de resultados de búsqueda.
  *
- * CAMBIO v3: el título ahora es un link a novel-details.html.
+ * CAMBIO v4: _buildCoverSection recibe el índice para
+ * aplicar fetchpriority="high" a las primeras 3 cards.
  *
  * @param {import('./vndb-service.js').VnEntry} vnEntry
  * @param {{isSaved?: boolean, savedStatus?: string|null, index?: number}} options
@@ -130,11 +183,11 @@ function createVnCard(vnEntry, { isSaved = false, savedStatus = null, index = 0 
   card.classList.add('vh-card--linkable');
   card.style.animationDelay = `${index * 40}ms`;
 
-  card.appendChild(_buildCoverSection(vnEntry));
+  // Pasar index para que las primeras 3 cards tengan fetchpriority="high"
+  card.appendChild(_buildCoverSection(vnEntry, index));
 
   const body = _el('div', 'vh-card__body');
 
-  // v3: título como link a la página de detalles
   const titleEl = _el('h3', 'vh-card__title');
   titleEl.appendChild(_buildTitleLink(vnEntry.id, vnEntry.title));
   body.appendChild(titleEl);
@@ -147,7 +200,6 @@ function createVnCard(vnEntry, { isSaved = false, savedStatus = null, index = 0 
   footer.appendChild(_buildAddButton(vnEntry, isSaved, savedStatus));
   card.appendChild(footer);
 
-  // Navegación al detalle al click sobre áreas no-interactivas
   card.addEventListener('click', (e) => {
     if (e.target.closest('[data-action]')) return;
     window.location.href = `novel-details.html?id=${encodeURIComponent(vnEntry.id)}`;
@@ -156,10 +208,20 @@ function createVnCard(vnEntry, { isSaved = false, savedStatus = null, index = 0 
   return card;
 }
 
-function _buildCoverSection(vnEntry) {
-  const wrapper = _el('div', 'vh-card__cover-wrapper');
-  const imgCls  = `vh-card__cover${vnEntry.imageIsAdult ? ' vh-card__cover--adult' : ''}`;
-  wrapper.appendChild(_safeImage(vnEntry.imageUrl, vnEntry.title, imgCls));
+/**
+ * Construye la sección de portada de una card.
+ *
+ * @param {object} vnEntry
+ * @param {number} [cardIndex=0] - Índice de la card en el grid.
+ *   Las primeras 3 (index < 3) reciben fetchpriority="high".
+ * @returns {HTMLElement}
+ */
+function _buildCoverSection(vnEntry, cardIndex = 0) {
+  const wrapper  = _el('div', 'vh-card__cover-wrapper');
+  const imgCls   = `vh-card__cover${vnEntry.imageIsAdult ? ' vh-card__cover--adult' : ''}`;
+  const priority = cardIndex < 3;
+
+  wrapper.appendChild(_safeImage(vnEntry.imageUrl, vnEntry.title, imgCls, priority));
 
   if (vnEntry.imageIsAdult) {
     wrapper.appendChild(
@@ -193,13 +255,16 @@ function _buildTagsRow(tags) {
 }
 
 function _buildAddButton(vnEntry, isSaved, savedStatus) {
-  const btn = _el('button', isSaved ? 'vh-card__add-btn vh-card__add-btn--saved' : 'vh-card__add-btn', {
-    'data-action': 'open-status-menu',
-    'data-vn-id':  vnEntry.id,
-    'aria-label':  isSaved
-      ? `Cambiar estado de ${vnEntry.title}`
-      : `Añadir ${vnEntry.title} a biblioteca`,
-  });
+  const btn = _el('button',
+    isSaved ? 'vh-card__add-btn vh-card__add-btn--saved' : 'vh-card__add-btn',
+    {
+      'data-action': 'open-status-menu',
+      'data-vn-id':  vnEntry.id,
+      'aria-label':  isSaved
+        ? `Cambiar estado de ${vnEntry.title}`
+        : `Añadir ${vnEntry.title} a biblioteca`,
+    }
+  );
 
   if (isSaved && savedStatus) {
     const meta = VN_STATUS_META[savedStatus];
@@ -221,11 +286,9 @@ function _buildAddButton(vnEntry, isSaved, savedStatus) {
 /**
  * Crea una card para los paneles de la biblioteca personal.
  *
- * CAMBIO v3: el título ahora es un link a novel-details.html.
- *
  * @param {import('./vndb-service.js').VnEntry} vnEntry
  * @param {import('./library-store.js').LibraryEntry} libraryEntry
- * @param {number} index - Para animación escalonada.
+ * @param {number} index - Para animación escalonada y fetchpriority.
  * @returns {HTMLElement}
  */
 function createLibraryCard(vnEntry, libraryEntry, index = 0) {
@@ -237,17 +300,15 @@ function createLibraryCard(vnEntry, libraryEntry, index = 0) {
   card.classList.add('vh-card--linkable');
   card.style.animationDelay = `${index * 35}ms`;
 
-  // Imagen con badge de estado
-  const coverSection       = _buildCoverSection(vnEntry);
+  // Imagen con badge de estado — index para fetchpriority
+  const coverSection       = _buildCoverSection(vnEntry, index);
   const statusBadgeWrapper = _el('div', 'vh-card__status-badge');
   statusBadgeWrapper.appendChild(createStatusBadge(libraryEntry.status));
   coverSection.appendChild(statusBadgeWrapper);
   card.appendChild(coverSection);
 
-  // Cuerpo
   const body = _el('div', 'vh-card__body');
 
-  // v3: título como link a la página de detalles
   const titleEl = _el('h3', 'vh-card__title');
   titleEl.appendChild(_buildTitleLink(vnEntry.id, vnEntry.title));
   body.appendChild(titleEl);
@@ -272,15 +333,12 @@ function createLibraryCard(vnEntry, libraryEntry, index = 0) {
 
   card.appendChild(body);
 
-  // Score (FINISHED)
   if (libraryEntry.status === VN_STATUS.FINISHED && libraryEntry.score) {
     card.appendChild(_buildScoreSection(libraryEntry.score));
   }
 
-  // Footer con controles
   card.appendChild(_buildLibraryFooter(vnEntry, libraryEntry));
 
-  // Navegación al detalle al click sobre áreas no-interactivas
   card.addEventListener('click', (e) => {
     if (e.target.closest('[data-action]')) return;
     window.location.href = `novel-details.html?id=${encodeURIComponent(vnEntry.id)}`;
@@ -303,26 +361,12 @@ function _buildScoreSection(scoreData) {
   return section;
 }
 
-/**
- * Footer de controles para cards de biblioteca.
- *
- * MODIFICADO v2: agrega botón contextual según estado:
- *  PLAYING  → "Editar bitácora"
- *  FINISHED → "Editar reseña"
- *  DROPPED  → "Editar comentario"
- *
- * @param {object} vnEntry
- * @param {object} libraryEntry
- * @returns {HTMLElement}
- */
 function _buildLibraryFooter(vnEntry, libraryEntry) {
   const footer = _el('div', 'vh-card__footer');
 
-  // Botón contextual según estado
   const editBtn = _buildEditButton(vnEntry, libraryEntry);
   if (editBtn) footer.appendChild(editBtn);
 
-  // Botón cambiar estado
   const changeBtn = _el('button', 'vh-card__change-btn', {
     'data-action': 'open-status-menu',
     'data-vn-id':  libraryEntry.vnId,
@@ -332,7 +376,6 @@ function _buildLibraryFooter(vnEntry, libraryEntry) {
   changeBtn.appendChild(_elText('span', '', 'Mover'));
   footer.appendChild(changeBtn);
 
-  // Botón eliminar
   const removeBtn = _el('button', 'vh-card__remove-btn', {
     'data-action': 'remove-vn',
     'data-vn-id':  libraryEntry.vnId,
@@ -345,13 +388,6 @@ function _buildLibraryFooter(vnEntry, libraryEntry) {
   return footer;
 }
 
-/**
- * Crea el botón de edición contextual según el estado de la entrada.
- *
- * @param {object} vnEntry
- * @param {object} libraryEntry
- * @returns {HTMLElement|null}
- */
 function _buildEditButton(vnEntry, libraryEntry) {
   const configs = {
     [VN_STATUS.PLAYING]: {

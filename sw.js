@@ -1,70 +1,98 @@
 /**
  * @file sw.js
  * @description Service Worker para VN-Hub.
- *              Estrategia: Cache-First para assets estáticos,
- *              Network-First para la API de VNDB.
  *
- * CACHES:
- *  - vnh-shell-v1   : HTML, CSS, JS, fuentes (Shell de la app)
- *  - vnh-images-v1  : Portadas de VNs (cache con LRU manual)
- *  - vnh-api-v1     : Respuestas de la API VNDB (5 min TTL)
  *
- * ESTRATEGIAS:
- *  - Shell  → Cache-First con fallback a red (nunca devuelve 503 si la red funciona)
- *  - API    → Network-First con fallback a caché
- *  - Images → Network-First con cache posterior (evita servir imágenes rotas)
- *
- * FIXES v1.1:
- *  - [FIX #1] _cacheFirst: si no hay caché Y la red falla, devuelve null
- *    en lugar de una Response 503 falsa que el browser podría cachear.
- *  - [FIX #2] Imágenes de VNDB cambian de Cache-First a Network-First-Then-Cache:
- *    la primera carga siempre va a la red para garantizar la imagen real.
- *    Solo en offline usa caché o placeholder SVG.
- *  - [FIX #3] install: si cache.addAll falla, el SW lanza el error correctamente
- *    en lugar de silenciarlo, para que el browser reintente en la próxima visita.
- *
- * @version 1.1
+ * @version 2.0
  */
 
 'use strict';
 
-// ── Versión del cache (incrementar al desplegar cambios) ──
-const CACHE_VERSION  = 'v1';
-const SHELL_CACHE    = `vnh-shell-${CACHE_VERSION}`;
-const IMAGES_CACHE   = `vnh-images-${CACHE_VERSION}`;
-const API_CACHE      = `vnh-api-${CACHE_VERSION}`;
 
-/** Máx. entradas en el cache de imágenes (LRU simple) */
+const CACHE_VERSION = 'v2';
+const SHELL_CACHE   = `vnh-shell-${CACHE_VERSION}`;
+const IMAGES_CACHE  = `vnh-images-${CACHE_VERSION}`;
+const API_CACHE     = `vnh-api-${CACHE_VERSION}`;
+
+
+// ─────────────────────────────────────────────
+// CONFIGURACIÓN
+// ─────────────────────────────────────────────
+
+/** Máximo de imágenes en caché antes de purgar el 10% más antiguo. */
 const MAX_IMAGE_CACHE_ENTRIES = 150;
 
-/** TTL en segundos para respuestas de API cacheadas */
-const API_CACHE_TTL_SECONDS = 300; // 5 minutos
+/** TTL para respuestas de la API VNDB (segundos). */
+const API_CACHE_TTL_SECONDS = 300;
 
-/**
- * Assets del shell que se precachean en install.
- * IMPORTANTE: todos estos archivos deben existir en el servidor.
- * Si alguno da 404, cache.addAll() falla y el SW no se instala.
- */
+
+// ─────────────────────────────────────────────
+// SHELL ASSETS — Lista exhaustiva
+//
+// REGLA: Todo archivo importado por app-init.js
+// (directa o transitivamente) DEBE estar aquí.
+// Si no está, el SW no puede servir la app offline.
+// ─────────────────────────────────────────────
+
 const SHELL_ASSETS = [
+  // ── Páginas HTML ───────────────────────────
   './',
   './index.html',
+  './novel-details.html',   // ← faltaba en v1
+
+  // ── CSS ────────────────────────────────────
   './assets/css/vn-hub.css',
   './assets/css/vn-hub-components.css',
   './assets/css/vn-hub-explore.css',
   './assets/css/vn-hub-export.css',
   './assets/css/vn-hub-profile.css',
   './assets/css/vn-hub-mobile.css',
+  './assets/css/vn-hub-details.css',   // ← faltaba en v1
+
+  // ── JS: núcleo ─────────────────────────────
   './js/app-init.js',
   './js/constants.js',
+  './js/utils.js',                     // ← faltaba en v1
   './js/render-engine.js',
   './js/ui-controller.js',
+
+  // ── JS: servicios ──────────────────────────
+  './js/vndb-service.js',              // ← faltaba en v1
+  './js/firebase-service.js',          // ← faltaba en v1
+  './js/library-store.js',             // ← faltaba en v1
+  './js/score-engine.js',              // ← faltaba en v1
+
+  // ── JS: controladores ──────────────────────
+  './js/auth-controller.js',           // ← faltaba en v1
   './js/feed-controller.js',
   './js/profile-controller.js',
   './js/explore-controller.js',
   './js/mobile-gestures.js',
+  './js/novel-details.js',             // ← faltaba en v1
+
+  // ── JS: traducciones ───────────────────────
+  './js/translation-service.js',       // ← faltaba en v1
+  './js/translation-tags.js',          // ← faltaba en v1 (164 KB — crítico offline)
+
+  // ── JS: modales ────────────────────────────
+  './js/modal-review.js',              // ← faltaba en v1
+  './js/modal-log.js',                 // ← faltaba en v1
+  './js/modal-comment.js',             // ← faltaba en v1
+  './js/modal-delete.js',              // ← faltaba en v1
+  './js/modal-export.js',              // ← faltaba en v1
+
+  // ── JS: extensiones ────────────────────────
+  './js/firebase-profile-ext.js',      // ← faltaba en v1
+
+  // ── PWA ────────────────────────────────────
+  './manifest.json',
 ];
 
-/** Placeholder SVG para imágenes que fallan estando offline */
+
+// ─────────────────────────────────────────────
+// FALLBACK SVG para imágenes que fallan offline
+// ─────────────────────────────────────────────
+
 const FALLBACK_IMAGE_SVG = `
 <svg xmlns="http://www.w3.org/2000/svg" width="200" height="300" viewBox="0 0 200 300">
   <rect width="200" height="300" fill="#f5f5f5"/>
@@ -80,19 +108,21 @@ const FALLBACK_IMAGE_SVG = `
 // ═══════════════════════════════════════════════════════════════
 
 self.addEventListener('install', (event) => {
-  console.info('[SW] Instalando…');
+  console.info('[SW] Instalando v2…');
 
   event.waitUntil(
     caches.open(SHELL_CACHE)
       .then(cache => cache.addAll(SHELL_ASSETS))
       .then(() => {
-        console.info('[SW] Shell precacheado.');
+        console.info('[SW] Shell precacheado ✓');
+
+
         return self.skipWaiting();
       })
-    // [FIX #3] Sin .catch() aquí — si un asset del shell da 404,
-    // el error se propaga y el SW NO se instala. Esto es correcto:
-    // es mejor no tener SW que tener uno con caché incompleta.
-    // Verificá que todos los archivos en SHELL_ASSETS existen.
+      .catch(err => {
+        console.error('[SW] Error al precachear shell:', err);
+        throw err;
+      })
   );
 });
 
@@ -112,12 +142,12 @@ self.addEventListener('activate', (event) => {
         keys
           .filter(key => !currentCaches.includes(key))
           .map(key => {
-            console.info(`[SW] Eliminando cache obsoleto: ${key}`);
+            console.info(`[SW] Eliminando caché obsoleto: ${key}`);
             return caches.delete(key);
           })
       ))
       .then(() => self.clients.claim())
-      .then(() => console.info('[SW] Activado y controlando clientes.'))
+      .then(() => console.info('[SW] Activado y controlando clientes ✓'))
   );
 });
 
@@ -130,31 +160,28 @@ self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
 
-  // Solo interceptar GET
+  // Solo interceptamos GET
   if (request.method !== 'GET') return;
 
-  // ── API de VNDB → Network-First con TTL ──
+  // ── API VNDB → Network-First con TTL ──────────────────────
   if (url.hostname === 'api.vndb.org') {
     event.respondWith(_networkFirst(request, API_CACHE, API_CACHE_TTL_SECONDS));
     return;
   }
 
-  // ── Imágenes de VNDB (CDN) → Network-First-Then-Cache ──
-  // [FIX #2] Cambiado de Cache-First a Network-First-Then-Cache.
-  // La primera carga siempre va a la red para garantizar la imagen real.
-  // Solo en offline usa caché o devuelve el placeholder SVG.
+  // ── Imágenes VNDB → Network-First + fallback SVG ──────────
   if (url.hostname.includes('s2.vndb.org') || url.hostname.includes('t.vndb.org')) {
     event.respondWith(_networkFirstImages(request, IMAGES_CACHE));
     return;
   }
 
-  // ── Fuentes de Google → Cache-First ──
+  // ── Google Fonts → Cache-First ────────────────────────────
   if (url.hostname === 'fonts.googleapis.com' || url.hostname === 'fonts.gstatic.com') {
     event.respondWith(_cacheFirst(request, SHELL_CACHE));
     return;
   }
 
-  // ── Shell de la app → Cache-First ──
+  // ── Assets propios (mismo origen) → Cache-First ───────────
   if (url.origin === self.location.origin) {
     event.respondWith(_cacheFirst(request, SHELL_CACHE));
     return;
@@ -163,43 +190,52 @@ self.addEventListener('fetch', (event) => {
 
 
 // ═══════════════════════════════════════════════════════════════
-// ESTRATEGIAS DE CACHE
+// ESTRATEGIAS DE CACHÉ
 // ═══════════════════════════════════════════════════════════════
 
 /**
- * Cache-First: devuelve desde caché si existe.
- * Si no está en caché, va a la red y cachea la respuesta.
- * [FIX #1] Si no hay caché Y la red falla, deja que el error
- * se propague al browser en lugar de devolver una respuesta 503
- * falsa que podría ser cacheada por el browser.
  *
  * @param {Request} request
  * @param {string}  cacheName
  * @returns {Promise<Response>}
  */
 async function _cacheFirst(request, cacheName) {
+  // 1. Intentar desde caché
   const cached = await caches.match(request);
   if (cached) return cached;
 
-  // Sin caché → ir a la red sin atrapar el error.
-  // Si la red falla, el browser muestra su propio error offline,
-  // que es más correcto que una respuesta 503 inventada.
-  const response = await fetch(request);
-  if (response.ok) {
-    const cache = await caches.open(cacheName);
-    cache.put(request, response.clone());
+  // 2. Si no hay caché, ir a la red
+  try {
+    const response = await fetch(request);
+    if (response.ok) {
+      const cache = await caches.open(cacheName);
+      // Guardamos un clon; el original se devuelve al navegador
+      cache.put(request, response.clone());
+    }
+    return response;
+  } catch {
+    // 3. Sin red y sin caché → respuesta de error controlada
+    console.warn('[SW] Sin red y sin caché para:', request.url);
+    return new Response('Recurso no disponible offline.', {
+      status:  503,
+      headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+    });
   }
-  return response;
 }
 
 /**
- * Network-First-Then-Cache para imágenes:
- * 1. Intenta la red primero → si responde OK, cachea y devuelve.
- * 2. Si la red falla (offline) → intenta caché.
- * 3. Si no hay caché → devuelve placeholder SVG.
+ * Network-First para imágenes VNDB.
+ * Con red: descarga, guarda en caché y devuelve la imagen real.
+ * Sin red: sirve desde caché o fallback SVG.
  *
- * Esto garantiza que cuando hay red, SIEMPRE se sirve la imagen real.
- * El caché solo se usa como respaldo offline.
+ * CORRECCIÓN BUG-05 (LRU):
+ * En v1 se borraban las primeras entradas del array de claves,
+ * que es el orden de inserción en el caché — no el de antigüedad real.
+ * El caché de la API Cache no garantiza orden cronológico en keys().
+ * Solución: guardar timestamp en el nombre de la entrada es complejo
+ * en Cache API; la solución pragmática para GitHub Pages es mantener
+ * el límite por conteo y aceptar que el orden es aproximado.
+ * Para LRU real se necesitaría IndexedDB (fuera de scope aquí).
  *
  * @param {Request} request
  * @param {string}  cacheName
@@ -212,11 +248,14 @@ async function _networkFirstImages(request, cacheName) {
     if (response.ok) {
       const cache = await caches.open(cacheName);
 
-      // Gestión de tamaño: borrar el 10% más antiguo si hay demasiadas entradas
+      // Purgar si el caché supera el límite
       const keys = await cache.keys();
       if (keys.length >= MAX_IMAGE_CACHE_ENTRIES) {
-        const toDelete = keys.slice(0, Math.ceil(MAX_IMAGE_CACHE_ENTRIES * 0.1));
-        await Promise.all(toDelete.map(k => cache.delete(k)));
+        const countToDelete = Math.ceil(MAX_IMAGE_CACHE_ENTRIES * 0.1);
+        await Promise.all(
+          keys.slice(0, countToDelete).map(k => cache.delete(k))
+        );
+        console.info(`[SW] Purgadas ${countToDelete} imágenes del caché.`);
       }
 
       cache.put(request, response.clone());
@@ -225,25 +264,29 @@ async function _networkFirstImages(request, cacheName) {
     return response;
 
   } catch {
-    // Sin red → intentar caché
+    // Sin red: intentar desde caché
     const cached = await caches.match(request);
     if (cached) return cached;
 
-    // Sin caché y sin red → placeholder SVG
+    // Sin caché: devolver placeholder SVG
     return new Response(FALLBACK_IMAGE_SVG, {
-      status: 200,
-      headers: { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'no-store' },
+      status:  200,
+      headers: {
+        'Content-Type':  'image/svg+xml',
+        'Cache-Control': 'no-store',
+      },
     });
   }
 }
 
 /**
- * Network-First con TTL para la API de VNDB.
- * Añade un header X-Cached-At para controlar la expiración.
+ * Network-First con TTL para la API VNDB.
+ * Con red: descarga, guarda con timestamp y devuelve la respuesta.
+ * Sin red: sirve desde caché si no expiró; si expiró o no hay, 503.
  *
  * @param {Request} request
  * @param {string}  cacheName
- * @param {number}  ttlSeconds
+ * @param {number}  ttlSeconds - Tiempo de vida en segundos.
  * @returns {Promise<Response>}
  */
 async function _networkFirst(request, cacheName, ttlSeconds) {
@@ -251,36 +294,53 @@ async function _networkFirst(request, cacheName, ttlSeconds) {
 
   try {
     const response = await fetch(request.clone());
+
     if (response.ok) {
+      // Inyectar timestamp para verificar TTL cuando estemos offline
       const headers = new Headers(response.headers);
       headers.set('X-Cached-At', String(Date.now()));
 
       const cachedResponse = new Response(await response.clone().blob(), {
-        status: response.status,
+        status:     response.status,
         statusText: response.statusText,
         headers,
       });
 
       cache.put(request, cachedResponse);
     }
+
     return response;
 
   } catch {
-    // Sin red → intentar caché con TTL
+    // Sin red: verificar TTL del caché
     const cached = await cache.match(request);
+
     if (cached) {
       const cachedAt = cached.headers.get('X-Cached-At');
+
       if (cachedAt) {
-        const age = (Date.now() - parseInt(cachedAt, 10)) / 1000;
-        if (age <= ttlSeconds) return cached;
+        const ageSeconds = (Date.now() - parseInt(cachedAt, 10)) / 1000;
+        if (ageSeconds <= ttlSeconds) {
+          console.info('[SW] API servida desde caché (age:', Math.round(ageSeconds), 's)');
+          return cached;
+        }
+        console.warn('[SW] Caché de API expirado. No hay red.');
       } else {
-        return cached; // Sin timestamp → devolver igual (mejor que nada)
+        // Sin timestamp: servir igual (beneficio de la duda)
+        return cached;
       }
     }
 
+    // Sin red y sin caché válido
     return new Response(
-      JSON.stringify({ error: 'offline', message: 'Sin conexión y sin caché disponible.' }),
-      { status: 503, headers: { 'Content-Type': 'application/json' } }
+      JSON.stringify({
+        error:   'offline',
+        message: 'Sin conexión y sin caché disponible.',
+      }),
+      {
+        status:  503,
+        headers: { 'Content-Type': 'application/json' },
+      }
     );
   }
 }

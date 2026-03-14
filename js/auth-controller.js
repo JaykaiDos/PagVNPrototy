@@ -6,11 +6,6 @@
  *              Maneja el botón de login/logout y el panel de perfil
  *              en el header. Reacciona a cambios de auth via onAuthChange().
  *
- * CAMBIOS v2:
- *  - _buildDropdown() incluye botón "Ver mi perfil" que dispara
- *    el evento 'vnh:navigate' con view='profile' para abrir
- *    el perfil propio sin acoplamiento directo a ui-controller.
- *
  * RESPONSABILIDAD ÚNICA:
  *  - Renderizar el estado del usuario en el header.
  *  - Disparar signInWithGoogle() / signOutUser().
@@ -486,7 +481,6 @@ async function _syncLibraryOnLogin(uid) {
 // ════════════════════════════════════════════════════════
 
 /**
- * Reacciona a los cambios de estado de autenticación.
  * @param {{uid,displayName,photoURL,email}|null} user
  */
 async function _onAuthChange(user) {
@@ -494,23 +488,18 @@ async function _onAuthChange(user) {
     _renderUserMenu(user);
     await _syncLibraryOnLogin(user.uid);
 
-    // Notificar a ui-controller para mostrar tabs protegidos
     try {
       const { setFeedTabVisible } = await import('./ui-controller.js');
       setFeedTabVisible(true);
     } catch {}
 
-    // [FLUJO POST-LOGIN] Si el usuario llegó a través de un enlace compartido
-    // (?profile=UID), navegar al perfil compartido en lugar del propio.
-    // Sin esta lógica, el flujo normal abriría el perfil propio al hacer login.
     try {
       const { getPendingProfileUid } = await import('./profile-controller.js');
       const pendingUid = getPendingProfileUid();
       if (pendingUid && pendingUid !== user.uid) {
-        // Perfil ajeno pendiente → abrirlo directamente
         const { openProfile } = await import('./profile-controller.js');
         openProfile(pendingUid);
-        return; // No continuar con el flujo de perfil propio
+        return;
       }
     } catch {}
 

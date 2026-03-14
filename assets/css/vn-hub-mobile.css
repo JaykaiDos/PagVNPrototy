@@ -1,8 +1,6 @@
-/*
- * vn-hub-mobile.css
- * Sistema Mobile-First completo para VN-Hub
- * Carga DESPUÉS de vn-hub-explore.css
- */
+/* ────────────────────────────────────────────────────────────────
+   VN-HUB — Módulo de estilos para optimización móvil
+──────────────────────────────────────────────────────────────── */
 
 /* ── Variables Mobile ───────────────────────────── */
 :root {
