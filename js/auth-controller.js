@@ -3,15 +3,12 @@
 /**
  * @file js/auth-controller.js
  * @description Controlador de UI para autenticación.
- *              Maneja el botón de login/logout y el panel de perfil
- *              en el header. Reacciona a cambios de auth via onAuthChange().
  *
- * RESPONSABILIDAD ÚNICA:
- *  - Renderizar el estado del usuario en el header.
- *  - Disparar signInWithGoogle() / signOutUser().
- *  - Sincronizar la biblioteca local con Firestore al iniciar sesión.
- *
- * NO hace: lógica de negocio, llamadas a VNDB, renders de cards.
+ * CAMBIOS v4:
+ *  - _renderLoginButton(): formulario como dropdown desplegable
+ *    (antes siempre visible en el header → ahora oculto hasta hacer clic)
+ *  - FIX email login: stopPropagation en los botones del formulario
+ *    evita que el listener de cierre del panel se dispare antes del handler
  */
 
 import * as FirebaseService from './firebase-service.js';
@@ -31,7 +28,8 @@ function _cacheDOM() {
 // ════════════════════════════════════════════════════════
 
 /**
- * Renderiza el botón de login (usuario no autenticado).
+ * Renderiza el botón de login con panel desplegable.
+ * El formulario se muestra/oculta al hacer clic en el botón.
  */
 function _renderLoginButton() {
   if (!_dom.authContainer) return;
@@ -40,44 +38,169 @@ function _renderLoginButton() {
     _dom.authContainer.removeChild(_dom.authContainer.firstChild);
   }
 
-  const box = document.createElement('div');
-  box.className = 'vh-login-box';
+  // ── Wrapper con posición relativa para el dropdown ──
+  const wrapper = document.createElement('div');
+  wrapper.style.cssText = 'position:relative;';
 
+  // ── Botón principal ──
+  const trigger = document.createElement('button');
+  trigger.className = 'vh-auth-btn--login';
+  trigger.setAttribute('aria-label', 'Iniciar sesión');
+  trigger.setAttribute('aria-expanded', 'false');
+
+  const triggerIcon = document.createElement('span');
+  triggerIcon.setAttribute('aria-hidden', 'true');
+  triggerIcon.textContent = '✦';
+
+  const triggerLabel = document.createElement('span');
+  triggerLabel.textContent = 'Iniciar sesión';
+
+  trigger.appendChild(triggerIcon);
+  trigger.appendChild(triggerLabel);
+
+  // ── Panel desplegable ──
+  const panel = document.createElement('div');
+  panel.id     = 'loginPanel';
+  panel.hidden = true;
+  panel.style.cssText = [
+    'position:absolute',
+    'top:calc(100% + 8px)',
+    'right:0',
+    'z-index:200',
+    'min-width:300px',
+    'background:var(--vh-bg-surface)',
+    'border:1.5px solid var(--vh-border)',
+    'border-radius:var(--vh-radius-lg)',
+    'padding:1.25rem',
+    'box-shadow:var(--vh-shadow-lg)',
+    'backdrop-filter:var(--vh-glass-blur)',
+    '-webkit-backdrop-filter:var(--vh-glass-blur)',
+  ].join(';');
+
+  // ── Botón Google ──
   const googleBtn = document.createElement('button');
-  googleBtn.className   = 'vh-auth-btn vh-auth-btn--login';
-  googleBtn.id          = 'loginBtnGoogle';
+  googleBtn.className = 'vh-auth-btn vh-auth-btn--login';
+  googleBtn.id        = 'loginBtnGoogle';
   googleBtn.setAttribute('aria-label', 'Iniciar sesión con Google');
-  const gIcon = document.createElement('span'); gIcon.setAttribute('aria-hidden', 'true'); gIcon.textContent = '✦';
-  const gLabel= document.createElement('span'); gLabel.textContent = 'Iniciar con Google';
-  googleBtn.appendChild(gIcon); googleBtn.appendChild(gLabel);
-  googleBtn.addEventListener('click', _handleLogin);
+  googleBtn.style.cssText = 'width:100%;margin-bottom:1rem;justify-content:center;';
 
+  const gIcon = document.createElement('span');
+  gIcon.setAttribute('aria-hidden', 'true');
+  gIcon.textContent = '✦';
+
+  const gLabel = document.createElement('span');
+  gLabel.textContent = 'Continuar con Google';
+
+  googleBtn.appendChild(gIcon);
+  googleBtn.appendChild(gLabel);
+
+  // FIX: stopPropagation para que el clic no cierre el panel
+  googleBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    _handleLogin();
+  });
+
+  // ── Formulario email/password ──
   const form = document.createElement('div');
   form.className = 'vh-login-form';
-  form.innerHTML = `
-    <div class="vh-field">
-      <label class="vh-field__label" for="authEmail">Correo electrónico</label>
-      <input class="vh-field__input" id="authEmail" type="email" autocomplete="email" />
-    </div>
-    <div class="vh-field">
-      <label class="vh-field__label" for="authPassword">Contraseña</label>
-      <input class="vh-field__input" id="authPassword" type="password" autocomplete="current-password" />
-      <p class="vh-field__hint" id="authError" style="color:var(--vh-danger);display:none;"></p>
-    </div>
-    <div class="vh-login-actions" style="display:flex;gap:.5rem;margin-top:.5rem;">
-      <button class="vh-btn vh-btn--primary" id="btnEmailLogin">Iniciar sesión</button>
-      <button class="vh-btn vh-btn--ghost"   id="btnEmailSignup">Registrarse</button>
-      <button class="vh-btn vh-btn--ghost"   id="btnResetPassword">Recuperar contraseña</button>
-    </div>
+
+  // Email
+  const emailField = document.createElement('div');
+  emailField.className = 'vh-field';
+  emailField.style.marginBottom = '0.75rem';
+  emailField.innerHTML = `
+    <label class="vh-field__label" for="authEmail">Correo electrónico</label>
+    <input class="vh-field__input" id="authEmail" type="email"
+           autocomplete="email" placeholder="tu@correo.com" />
   `;
 
-  box.appendChild(googleBtn);
-  box.appendChild(form);
-  _dom.authContainer.appendChild(box);
+  // Password
+  const pwField = document.createElement('div');
+  pwField.className = 'vh-field';
+  pwField.style.marginBottom = '0.75rem';
+  pwField.innerHTML = `
+    <label class="vh-field__label" for="authPassword">Contraseña</label>
+    <input class="vh-field__input" id="authPassword" type="password"
+           autocomplete="current-password" placeholder="••••••••" />
+    <p class="vh-field__hint" id="authError"
+       style="color:var(--vh-danger);font-size:0.82rem;margin-top:0.4rem;display:none;"></p>
+  `;
 
-  document.getElementById('btnEmailLogin')?.addEventListener('click', _handleEmailLogin);
-  document.getElementById('btnEmailSignup')?.addEventListener('click', _handleEmailSignup);
-  document.getElementById('btnResetPassword')?.addEventListener('click', _handlePasswordReset);
+  // Botones de acción
+  const actions = document.createElement('div');
+  actions.style.cssText = 'display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.5rem;';
+
+  const btnLogin = document.createElement('button');
+  btnLogin.className   = 'vh-btn vh-btn--primary';
+  btnLogin.id          = 'btnEmailLogin';
+  btnLogin.textContent = 'Iniciar sesión';
+
+  const btnSignup = document.createElement('button');
+  btnSignup.className   = 'vh-btn vh-btn--ghost';
+  btnSignup.id          = 'btnEmailSignup';
+  btnSignup.textContent = 'Registrarse';
+
+  const btnReset = document.createElement('button');
+  btnReset.className   = 'vh-btn vh-btn--ghost';
+  btnReset.id          = 'btnResetPassword';
+  btnReset.textContent = 'Recuperar';
+
+  // FIX: stopPropagation en todos los botones del formulario
+  [btnLogin, btnSignup, btnReset].forEach(btn => {
+    btn.addEventListener('click', (e) => e.stopPropagation());
+  });
+
+  btnLogin.addEventListener('click', _handleEmailLogin);
+  btnSignup.addEventListener('click', _handleEmailSignup);
+  btnReset.addEventListener('click', _handlePasswordReset);
+
+  // Enter en el campo de contraseña también hace login
+  pwField.querySelector('input')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.stopPropagation();
+      _handleEmailLogin();
+    }
+  });
+
+  actions.appendChild(btnLogin);
+  actions.appendChild(btnSignup);
+  actions.appendChild(btnReset);
+
+  form.appendChild(emailField);
+  form.appendChild(pwField);
+  form.appendChild(actions);
+
+  panel.appendChild(googleBtn);
+  panel.appendChild(form);
+
+  // ── Toggle del panel al hacer clic en el botón ──
+  trigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isOpen = !panel.hidden;
+    panel.hidden = isOpen;
+    trigger.setAttribute('aria-expanded', String(!isOpen));
+  });
+
+  // ── Cerrar al clickear fuera del wrapper ──
+  document.addEventListener('click', (e) => {
+    if (!wrapper.contains(e.target)) {
+      panel.hidden = true;
+      trigger.setAttribute('aria-expanded', 'false');
+    }
+  });
+
+  // ── Cerrar con Escape ──
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !panel.hidden) {
+      panel.hidden = true;
+      trigger.setAttribute('aria-expanded', 'false');
+      trigger.focus();
+    }
+  });
+
+  wrapper.appendChild(trigger);
+  wrapper.appendChild(panel);
+  _dom.authContainer.appendChild(wrapper);
 }
 
 /**
@@ -106,7 +229,7 @@ function _renderUserMenu(user) {
   avatar.className = 'vh-user-menu__avatar';
 
   if (user.photoURL) {
-    const img    = document.createElement('img');
+    const img     = document.createElement('img');
     const safeUrl = /^https:\/\//i.test(user.photoURL) ? user.photoURL : '';
     img.setAttribute('src',     safeUrl);
     img.setAttribute('alt',     user.displayName);
@@ -122,9 +245,9 @@ function _renderUserMenu(user) {
   name.textContent = user.displayName.slice(0, 18) + (user.displayName.length > 18 ? '…' : '');
 
   const arrow = document.createElement('span');
-  arrow.className      = 'vh-user-menu__arrow';
+  arrow.className   = 'vh-user-menu__arrow';
   arrow.setAttribute('aria-hidden', 'true');
-  arrow.textContent    = '▾';
+  arrow.textContent = '▾';
 
   trigger.appendChild(avatar);
   trigger.appendChild(name);
@@ -146,10 +269,8 @@ function _renderUserMenu(user) {
 
 /**
  * Construye el dropdown con opciones del usuario.
- * Incluye botón "Ver mi perfil" que navega a la vista de perfil.
- *
  * @param {{uid, displayName, email}} user
- * @param {HTMLElement} trigger — necesario para cerrar el dropdown al navegar
+ * @param {HTMLElement} trigger
  * @returns {HTMLElement}
  */
 function _buildDropdown(user, trigger) {
@@ -158,7 +279,6 @@ function _buildDropdown(user, trigger) {
   dropdown.setAttribute('role',   'menu');
   dropdown.setAttribute('hidden', '');
 
-  // Email (solo informativo)
   const emailEl = document.createElement('p');
   emailEl.className   = 'vh-user-menu__email';
   emailEl.textContent = user.email;
@@ -166,9 +286,9 @@ function _buildDropdown(user, trigger) {
 
   dropdown.appendChild(_buildSeparator());
 
-  // ── Botón "Ver mi perfil" ──────────────────────────────────────
+  // Ver mi perfil
   const profileBtn = document.createElement('button');
-  profileBtn.className   = 'vh-user-menu__item';
+  profileBtn.className = 'vh-user-menu__item';
   profileBtn.setAttribute('role', 'menuitem');
 
   const profileIcon = document.createElement('span');
@@ -180,10 +300,8 @@ function _buildDropdown(user, trigger) {
 
   profileBtn.appendChild(profileIcon);
   profileBtn.appendChild(profileLabel);
-
   profileBtn.addEventListener('click', () => {
     _closeDropdown(trigger, dropdown);
-    // Notificar a ui-controller para navegar al perfil propio
     document.dispatchEvent(
       new CustomEvent('vnh:navigate', { detail: { view: 'profile', uid: null } })
     );
@@ -191,17 +309,15 @@ function _buildDropdown(user, trigger) {
 
   dropdown.appendChild(profileBtn);
   dropdown.appendChild(_buildSeparator());
-
-  // ── Selector de privacidad ────────────────────────────────────
   dropdown.appendChild(_buildPrivacySelector());
   dropdown.appendChild(_buildSeparator());
 
-  // ── Botón cerrar sesión ───────────────────────────────────────
+  // Cerrar sesión
   const logoutBtn = document.createElement('button');
-  logoutBtn.className   = 'vh-user-menu__item vh-user-menu__item--danger';
+  logoutBtn.className = 'vh-user-menu__item vh-user-menu__item--danger';
   logoutBtn.setAttribute('role', 'menuitem');
 
-  const logoutIcon  = document.createElement('span');
+  const logoutIcon = document.createElement('span');
   logoutIcon.setAttribute('aria-hidden', 'true');
   logoutIcon.textContent = '↩';
 
@@ -244,16 +360,15 @@ function _buildPrivacySelector() {
     btn.dataset.privacy = opt.value;
     btn.setAttribute('role', 'menuitem');
 
-    const icon  = document.createElement('span');
+    const icon = document.createElement('span');
     icon.setAttribute('aria-hidden', 'true');
     icon.textContent = opt.icon;
 
-    const text  = document.createElement('span');
+    const text = document.createElement('span');
     text.textContent = opt.text;
 
     btn.appendChild(icon);
     btn.appendChild(text);
-
     btn.addEventListener('click', () => _handlePrivacyChange(opt.value, btnGroup));
     btnGroup.appendChild(btn);
   });
@@ -315,10 +430,10 @@ async function _handleEmailLogin() {
     const email = document.getElementById('authEmail')?.value.trim() ?? '';
     const pw    = document.getElementById('authPassword')?.value ?? '';
     if (!_validateEmail(email)) { _showAuthError('Correo inválido.'); return; }
-    if (pw.length < 1) { _showAuthError('Ingresa tu contraseña.'); return; }
+    if (pw.length < 1) { _showAuthError('Ingresá tu contraseña.'); return; }
     await FirebaseService.signInWithEmailPassword(email, pw);
   } catch (err) {
-    _showAuthError('No se pudo iniciar sesión. Verifica tus datos.');
+    _showAuthError('No se pudo iniciar sesión. Verificá tus datos.');
     console.error('[AuthController] Email login error:', err);
   }
 }
@@ -330,7 +445,7 @@ async function _handleEmailSignup() {
     const pw    = document.getElementById('authPassword')?.value ?? '';
     if (!_validateEmail(email)) { _showAuthError('Correo inválido.'); return; }
     if (!_validatePassword(pw)) {
-      _showAuthError('Contraseña insegura. Usa 8+ caracteres con mayúscula, minúscula y número.');
+      _showAuthError('Contraseña insegura. Usá 8+ caracteres con mayúscula, minúscula y número.');
       return;
     }
     await FirebaseService.signUpWithEmailPassword(email, pw);
@@ -382,7 +497,10 @@ async function _handlePrivacyChange(privacy, btnGroup) {
  */
 function _markActivePrivacy(btnGroup, activeValue) {
   btnGroup.querySelectorAll('[data-privacy]').forEach(btn => {
-    btn.classList.toggle('vh-privacy-selector__btn--active', btn.dataset.privacy === activeValue);
+    btn.classList.toggle(
+      'vh-privacy-selector__btn--active',
+      btn.dataset.privacy === activeValue
+    );
   });
 }
 
