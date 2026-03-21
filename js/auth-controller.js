@@ -4,11 +4,35 @@
  * @file js/auth-controller.js
  * @description Controlador de UI para autenticación.
  *
- * CAMBIOS v4:
- *  - _renderLoginButton(): formulario como dropdown desplegable
- *    (antes siempre visible en el header → ahora oculto hasta hacer clic)
- *  - FIX email login: stopPropagation en los botones del formulario
- *    evita que el listener de cierre del panel se dispare antes del handler
+ * CAMBIOS v5 — Login móvil con Bottom Sheet:
+ * ─────────────────────────────────────────────────────────────────
+ *  PROBLEMA DETECTADO:
+ *   En viewports ≤ 767px el panel de login usaba position:absolute
+ *   con right:0 dentro del header comprimido. Al no haber espacio
+ *   horizontal suficiente, el panel se desbordaba fuera de la pantalla
+ *   o quedaba invisible. Además, el scroll interno del formulario
+ *   (inputs de email/password) bloqueaba el gestor de scroll nativo
+ *   del navegador móvil causando problemas de UX.
+ *
+ *  SOLUCIÓN:
+ *   Se introduce detección de viewport al abrir el panel.
+ *   - Desktop (> 767px) → comportamiento anterior: dropdown bajo el botón.
+ *   - Móvil  (≤ 767px)  → Bottom Sheet: modal deslizable desde abajo,
+ *     con overlay oscuro semitransparente y handle visual de arrastre.
+ *     El formulario se renderiza dentro del sheet con las mismas
+ *     acciones que el dropdown (Google, email/password, recuperar).
+ *
+ *  PRINCIPIOS APLICADOS:
+ *   - SRP: _openLoginPanel() decide el modo; _openLoginDropdown() y
+ *     _openLoginSheet() son responsables exclusivos de cada UI.
+ *   - DRY: los campos y handlers del formulario se construyen una sola
+ *     vez en _buildLoginForm() y se reutilizan en ambos modos.
+ *   - Sin duplicación de listeners: el bottom sheet se crea lazy
+ *     la primera vez y se reutiliza en llamadas posteriores.
+ *
+ * CAMBIOS v4 (previos, mantenidos):
+ *  - _renderLoginButton(): formulario como dropdown desplegable.
+ *  - FIX email login: stopPropagation en botones del formulario.
  */
 
 import * as FirebaseService from './firebase-service.js';
@@ -17,6 +41,23 @@ import * as LibraryStore    from './library-store.js';
 
 // ── Referencias DOM (cacheadas al init) ─────────────────────────────
 const _dom = {};
+
+/** Referencia al bottom sheet creado (singleton lazy). */
+let _sheet     = null;
+/** Referencia al overlay del bottom sheet (singleton lazy). */
+let _sheetBg   = null;
+/** Referencia al trigger del login (para restaurar foco al cerrar). */
+let _lastTrigger = null;
+
+
+// ─────────────────────────────────────────────
+// HELPERS INTERNOS
+// ─────────────────────────────────────────────
+
+/** @returns {boolean} true si el viewport es móvil (≤ 767px) */
+function _isMobile() {
+  return window.matchMedia('(max-width: 767px)').matches;
+}
 
 function _cacheDOM() {
   _dom.authContainer = document.getElementById('authContainer');
@@ -28,8 +69,9 @@ function _cacheDOM() {
 // ════════════════════════════════════════════════════════
 
 /**
- * Renderiza el botón de login con panel desplegable.
- * El formulario se muestra/oculta al hacer clic en el botón.
+ * Renderiza el botón de login.
+ * En desktop abre un dropdown bajo el botón.
+ * En móvil abre un bottom sheet desde la parte inferior.
  */
 function _renderLoginButton() {
   if (!_dom.authContainer) return;
@@ -38,15 +80,16 @@ function _renderLoginButton() {
     _dom.authContainer.removeChild(_dom.authContainer.firstChild);
   }
 
-  // ── Wrapper con posición relativa para el dropdown ──
+  // ── Wrapper ──
   const wrapper = document.createElement('div');
   wrapper.style.cssText = 'position:relative;';
 
-  // ── Botón principal ──
+  // ── Botón trigger ──
   const trigger = document.createElement('button');
   trigger.className = 'vh-auth-btn--login';
   trigger.setAttribute('aria-label', 'Iniciar sesión');
   trigger.setAttribute('aria-expanded', 'false');
+  trigger.setAttribute('aria-haspopup', 'dialog');
 
   const triggerIcon = document.createElement('span');
   triggerIcon.setAttribute('aria-hidden', 'true');
@@ -58,142 +101,47 @@ function _renderLoginButton() {
   trigger.appendChild(triggerIcon);
   trigger.appendChild(triggerLabel);
 
-  // ── Panel desplegable ──
+  // ── Panel dropdown (desktop) ──
   const panel = document.createElement('div');
-  panel.id     = 'loginPanel';
-  panel.hidden = true;
-  panel.style.cssText = [
-    'position:absolute',
-    'top:calc(100% + 8px)',
-    'right:0',
-    'z-index:200',
-    'min-width:300px',
-    'background:var(--vh-bg-surface)',
-    'border:1.5px solid var(--vh-border)',
-    'border-radius:var(--vh-radius-lg)',
-    'padding:1.25rem',
-    'box-shadow:var(--vh-shadow-lg)',
-    'backdrop-filter:var(--vh-glass-blur)',
-    '-webkit-backdrop-filter:var(--vh-glass-blur)',
-  ].join(';');
+  panel.id        = 'loginPanel';
+  panel.hidden    = true;
+  panel.className = 'vh-login-dropdown';
+  panel.setAttribute('role', 'dialog');
+  panel.setAttribute('aria-label', 'Formulario de inicio de sesión');
 
-  // ── Botón Google ──
-  const googleBtn = document.createElement('button');
-  googleBtn.className = 'vh-auth-btn vh-auth-btn--login';
-  googleBtn.id        = 'loginBtnGoogle';
-  googleBtn.setAttribute('aria-label', 'Iniciar sesión con Google');
-  googleBtn.style.cssText = 'width:100%;margin-bottom:1rem;justify-content:center;';
+  // Construir el formulario DESKTOP dentro del dropdown
+  panel.appendChild(_buildLoginForm('dropdown'));
 
-  const gIcon = document.createElement('span');
-  gIcon.setAttribute('aria-hidden', 'true');
-  gIcon.textContent = '✦';
-
-  const gLabel = document.createElement('span');
-  gLabel.textContent = 'Continuar con Google';
-
-  googleBtn.appendChild(gIcon);
-  googleBtn.appendChild(gLabel);
-
-  // FIX: stopPropagation para que el clic no cierre el panel
-  googleBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    _handleLogin();
-  });
-
-  // ── Formulario email/password ──
-  const form = document.createElement('div');
-  form.className = 'vh-login-form';
-
-  // Email
-  const emailField = document.createElement('div');
-  emailField.className = 'vh-field';
-  emailField.style.marginBottom = '0.75rem';
-  emailField.innerHTML = `
-    <label class="vh-field__label" for="authEmail">Correo electrónico</label>
-    <input class="vh-field__input" id="authEmail" type="email"
-           autocomplete="email" placeholder="tu@correo.com" />
-  `;
-
-  // Password
-  const pwField = document.createElement('div');
-  pwField.className = 'vh-field';
-  pwField.style.marginBottom = '0.75rem';
-  pwField.innerHTML = `
-    <label class="vh-field__label" for="authPassword">Contraseña</label>
-    <input class="vh-field__input" id="authPassword" type="password"
-           autocomplete="current-password" placeholder="••••••••" />
-    <p class="vh-field__hint" id="authError"
-       style="color:var(--vh-danger);font-size:0.82rem;margin-top:0.4rem;display:none;"></p>
-  `;
-
-  // Botones de acción
-  const actions = document.createElement('div');
-  actions.style.cssText = 'display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.5rem;';
-
-  const btnLogin = document.createElement('button');
-  btnLogin.className   = 'vh-btn vh-btn--primary';
-  btnLogin.id          = 'btnEmailLogin';
-  btnLogin.textContent = 'Iniciar sesión';
-
-  const btnSignup = document.createElement('button');
-  btnSignup.className   = 'vh-btn vh-btn--ghost';
-  btnSignup.id          = 'btnEmailSignup';
-  btnSignup.textContent = 'Registrarse';
-
-  const btnReset = document.createElement('button');
-  btnReset.className   = 'vh-btn vh-btn--ghost';
-  btnReset.id          = 'btnResetPassword';
-  btnReset.textContent = 'Recuperar';
-
-  // FIX: stopPropagation en todos los botones del formulario
-  [btnLogin, btnSignup, btnReset].forEach(btn => {
-    btn.addEventListener('click', (e) => e.stopPropagation());
-  });
-
-  btnLogin.addEventListener('click', _handleEmailLogin);
-  btnSignup.addEventListener('click', _handleEmailSignup);
-  btnReset.addEventListener('click', _handlePasswordReset);
-
-  // Enter en el campo de contraseña también hace login
-  pwField.querySelector('input')?.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.stopPropagation();
-      _handleEmailLogin();
-    }
-  });
-
-  actions.appendChild(btnLogin);
-  actions.appendChild(btnSignup);
-  actions.appendChild(btnReset);
-
-  form.appendChild(emailField);
-  form.appendChild(pwField);
-  form.appendChild(actions);
-
-  panel.appendChild(googleBtn);
-  panel.appendChild(form);
-
-  // ── Toggle del panel al hacer clic en el botón ──
+  // ── Toggle: decide desktop vs móvil ──
   trigger.addEventListener('click', (e) => {
     e.stopPropagation();
-    const isOpen = !panel.hidden;
-    panel.hidden = isOpen;
-    trigger.setAttribute('aria-expanded', String(!isOpen));
-  });
+    _lastTrigger = trigger;
 
-  // ── Cerrar al clickear fuera del wrapper ──
-  document.addEventListener('click', (e) => {
-    if (!wrapper.contains(e.target)) {
-      panel.hidden = true;
-      trigger.setAttribute('aria-expanded', 'false');
+    if (_isMobile()) {
+      // En móvil: SIEMPRE abrir el bottom sheet, nunca el dropdown
+      _openLoginSheet(trigger);
+    } else {
+      // En desktop: toggle del dropdown
+      const isOpen = !panel.hidden;
+      if (isOpen) {
+        _closeLoginDropdown(panel, trigger);
+      } else {
+        _openLoginDropdown(panel, trigger);
+      }
     }
   });
 
-  // ── Cerrar con Escape ──
+  // ── Cerrar dropdown al clickear fuera (desktop) ──
+  document.addEventListener('click', (e) => {
+    if (!panel.hidden && !wrapper.contains(e.target)) {
+      _closeLoginDropdown(panel, trigger);
+    }
+  });
+
+  // ── Cerrar con Escape (desktop) ──
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && !panel.hidden) {
-      panel.hidden = true;
-      trigger.setAttribute('aria-expanded', 'false');
+      _closeLoginDropdown(panel, trigger);
       trigger.focus();
     }
   });
@@ -391,17 +339,352 @@ function _buildSeparator() {
 
 
 // ════════════════════════════════════════════════════════
-// 2. HANDLERS DE EVENTOS
+// 2. FORMULARIO DE LOGIN (reutilizable en dropdown y sheet)
 // ════════════════════════════════════════════════════════
 
+/**
+ * Construye el contenido del formulario de login.
+ * Se llama tanto para el dropdown (desktop) como para el
+ * bottom sheet (móvil), asegurando IDs únicos por contexto
+ * para evitar colisiones en el DOM.
+ *
+ * @param {'dropdown'|'sheet'} context - Contexto de renderizado
+ * @returns {DocumentFragment}
+ */
+function _buildLoginForm(context) {
+  const suffix = context === 'sheet' ? '_sheet' : '';
+  const frag   = document.createDocumentFragment();
+
+  // ── Botón Google ──
+  const googleBtn = document.createElement('button');
+  googleBtn.className = 'vh-auth-btn vh-auth-btn--login vh-login-google-btn';
+  googleBtn.id        = `loginBtnGoogle${suffix}`;
+  googleBtn.setAttribute('aria-label', 'Iniciar sesión con Google');
+  googleBtn.setAttribute('type', 'button');
+
+  const gIcon = document.createElement('span');
+  gIcon.setAttribute('aria-hidden', 'true');
+  gIcon.textContent = '✦';
+
+  const gLabel = document.createElement('span');
+  gLabel.textContent = 'Continuar con Google';
+
+  googleBtn.appendChild(gIcon);
+  googleBtn.appendChild(gLabel);
+
+  googleBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (context === 'sheet') _closeLoginSheet();
+    _handleLogin();
+  });
+
+  // ── Separador visual ──
+  const divider = document.createElement('div');
+  divider.className   = 'vh-login-divider';
+  divider.setAttribute('aria-hidden', 'true');
+
+  const divLine1 = document.createElement('span');
+  const divText  = document.createElement('span');
+  divText.textContent = 'o';
+  const divLine2 = document.createElement('span');
+
+  divider.appendChild(divLine1);
+  divider.appendChild(divText);
+  divider.appendChild(divLine2);
+
+  // ── Campo email ──
+  const emailField = document.createElement('div');
+  emailField.className = 'vh-field';
+
+  const emailLabel = document.createElement('label');
+  emailLabel.className   = 'vh-field__label';
+  emailLabel.htmlFor     = `authEmail${suffix}`;
+  emailLabel.textContent = 'Correo electrónico';
+
+  const emailInput = document.createElement('input');
+  emailInput.className     = 'vh-field__input';
+  emailInput.id            = `authEmail${suffix}`;
+  emailInput.type          = 'email';
+  emailInput.autocomplete  = 'email';
+  emailInput.placeholder   = 'tu@correo.com';
+
+  emailField.appendChild(emailLabel);
+  emailField.appendChild(emailInput);
+
+  // ── Campo contraseña ──
+  const pwField = document.createElement('div');
+  pwField.className = 'vh-field';
+
+  const pwLabel = document.createElement('label');
+  pwLabel.className   = 'vh-field__label';
+  pwLabel.htmlFor     = `authPassword${suffix}`;
+  pwLabel.textContent = 'Contraseña';
+
+  // Wrapper para input + toggle de visibilidad
+  const pwWrap = document.createElement('div');
+  pwWrap.className = 'vh-field__pw-wrap';
+
+  const pwInput = document.createElement('input');
+  pwInput.className     = 'vh-field__input';
+  pwInput.id            = `authPassword${suffix}`;
+  pwInput.type          = 'password';
+  pwInput.autocomplete  = 'current-password';
+  pwInput.placeholder   = '••••••••';
+
+  // Botón ojo para mostrar/ocultar contraseña
+  const eyeBtn = document.createElement('button');
+  eyeBtn.type      = 'button';
+  eyeBtn.className = 'vh-field__pw-eye';
+  eyeBtn.setAttribute('aria-label', 'Mostrar contraseña');
+  eyeBtn.setAttribute('aria-pressed', 'false');
+  eyeBtn.textContent = '👁';
+  eyeBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isVisible = pwInput.type === 'text';
+    pwInput.type = isVisible ? 'password' : 'text';
+    eyeBtn.setAttribute('aria-pressed', String(!isVisible));
+    eyeBtn.setAttribute('aria-label', isVisible ? 'Mostrar contraseña' : 'Ocultar contraseña');
+    eyeBtn.style.opacity = isVisible ? '0.5' : '1';
+  });
+
+  pwWrap.appendChild(pwInput);
+  pwWrap.appendChild(eyeBtn);
+
+  // Mensaje de error
+  const errorMsg = document.createElement('p');
+  errorMsg.className  = 'vh-field__hint vh-auth-error';
+  errorMsg.id         = `authError${suffix}`;
+  errorMsg.style.display = 'none';
+  errorMsg.setAttribute('role', 'alert');
+  errorMsg.setAttribute('aria-live', 'polite');
+
+  pwField.appendChild(pwLabel);
+  pwField.appendChild(pwWrap);
+  pwField.appendChild(errorMsg);
+
+  // ── Botones de acción ──
+  const actions = document.createElement('div');
+  actions.className = 'vh-login-actions';
+
+  const btnLogin = document.createElement('button');
+  btnLogin.className   = 'vh-btn vh-btn--primary';
+  btnLogin.type        = 'button';
+  btnLogin.id          = `btnEmailLogin${suffix}`;
+  btnLogin.textContent = 'Iniciar sesión';
+
+  const btnSignup = document.createElement('button');
+  btnSignup.className   = 'vh-btn vh-btn--ghost';
+  btnSignup.type        = 'button';
+  btnSignup.id          = `btnEmailSignup${suffix}`;
+  btnSignup.textContent = 'Registrarse';
+
+  const btnReset = document.createElement('button');
+  btnReset.className   = 'vh-btn vh-btn--ghost vh-login-reset-btn';
+  btnReset.type        = 'button';
+  btnReset.id          = `btnResetPassword${suffix}`;
+  btnReset.textContent = '¿Olvidaste tu contraseña?';
+
+  // stopPropagation para no cerrar el panel al hacer clic
+  [btnLogin, btnSignup, btnReset].forEach(btn => {
+    btn.addEventListener('click', (e) => e.stopPropagation());
+  });
+
+  // Helpers para leer los campos de ESTE formulario específico
+  const getEmail = () => emailInput.value.trim();
+  const getPw    = () => pwInput.value;
+  const showErr  = (msg) => {
+    errorMsg.textContent = msg;
+    errorMsg.style.display = 'block';
+    emailInput.setAttribute('aria-invalid', 'true');
+  };
+  const clearErr = () => {
+    errorMsg.textContent = '';
+    errorMsg.style.display = 'none';
+    emailInput.removeAttribute('aria-invalid');
+  };
+
+  btnLogin.addEventListener('click', () => _handleEmailLoginLocal(getEmail, getPw, showErr, clearErr));
+  btnSignup.addEventListener('click', () => _handleEmailSignupLocal(getEmail, getPw, showErr, clearErr));
+  btnReset.addEventListener('click', () => _handlePasswordResetLocal(getEmail, showErr, clearErr));
+
+  // Enter en contraseña dispara login
+  pwInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.stopPropagation();
+      _handleEmailLoginLocal(getEmail, getPw, showErr, clearErr);
+    }
+  });
+
+  actions.appendChild(btnLogin);
+  actions.appendChild(btnSignup);
+
+  frag.appendChild(googleBtn);
+  frag.appendChild(divider);
+  frag.appendChild(emailField);
+  frag.appendChild(pwField);
+  frag.appendChild(actions);
+  frag.appendChild(btnReset);
+
+  return frag;
+}
+
+
+// ════════════════════════════════════════════════════════
+// 3. DROPDOWN (desktop)
+// ════════════════════════════════════════════════════════
+
+/**
+ * Abre el dropdown de login (desktop).
+ * @param {HTMLElement} panel
+ * @param {HTMLElement} trigger
+ */
+function _openLoginDropdown(panel, trigger) {
+  panel.hidden = false;
+  trigger.setAttribute('aria-expanded', 'true');
+  // Foco al primer input del formulario
+  requestAnimationFrame(() => {
+    panel.querySelector('input[type="email"]')?.focus();
+  });
+}
+
+/**
+ * Cierra el dropdown de login (desktop).
+ * @param {HTMLElement} panel
+ * @param {HTMLElement} trigger
+ */
+function _closeLoginDropdown(panel, trigger) {
+  panel.hidden = true;
+  trigger.setAttribute('aria-expanded', 'false');
+}
+
+
+// ════════════════════════════════════════════════════════
+// 4. BOTTOM SHEET (móvil)
+// ════════════════════════════════════════════════════════
+
+/**
+ * Crea el bottom sheet la primera vez (lazy singleton).
+ * Las llamadas posteriores reutilizan el elemento existente.
+ */
+function _ensureSheet() {
+  if (_sheet) return;
+
+  // ── Overlay semitransparente ──
+  _sheetBg = document.createElement('div');
+  _sheetBg.className = 'vh-login-sheet-bg';
+  _sheetBg.setAttribute('aria-hidden', 'true');
+  _sheetBg.addEventListener('click', _closeLoginSheet);
+
+  // ── Sheet container ──
+  _sheet = document.createElement('div');
+  _sheet.className = 'vh-login-sheet';
+  _sheet.setAttribute('role', 'dialog');
+  _sheet.setAttribute('aria-modal', 'true');
+  _sheet.setAttribute('aria-label', 'Iniciar sesión');
+
+  // Handle visual de arrastre (decorativo)
+  const handle = document.createElement('div');
+  handle.className = 'vh-login-sheet__handle';
+  handle.setAttribute('aria-hidden', 'true');
+
+  // Header del sheet
+  const header = document.createElement('div');
+  header.className = 'vh-login-sheet__header';
+
+  const title = document.createElement('h2');
+  title.className   = 'vh-login-sheet__title';
+  title.textContent = 'Iniciar sesión';
+
+  const closeBtn = document.createElement('button');
+  closeBtn.type      = 'button';
+  closeBtn.className = 'vh-login-sheet__close';
+  closeBtn.setAttribute('aria-label', 'Cerrar panel de inicio de sesión');
+  closeBtn.textContent = '✕';
+  closeBtn.addEventListener('click', _closeLoginSheet);
+
+  header.appendChild(title);
+  header.appendChild(closeBtn);
+
+  // Cuerpo del sheet con el formulario
+  const body = document.createElement('div');
+  body.className = 'vh-login-sheet__body';
+  body.appendChild(_buildLoginForm('sheet'));
+
+  _sheet.appendChild(handle);
+  _sheet.appendChild(header);
+  _sheet.appendChild(body);
+
+  document.body.appendChild(_sheetBg);
+  document.body.appendChild(_sheet);
+
+  // Cerrar con Escape
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && _sheet?.classList.contains('is-open')) {
+      _closeLoginSheet();
+    }
+  });
+}
+
+/**
+ * Abre el bottom sheet de login (móvil).
+ * @param {HTMLElement} trigger - Botón que disparó la apertura (para ARIA)
+ */
+function _openLoginSheet(trigger) {
+  _ensureSheet();
+
+  trigger.setAttribute('aria-expanded', 'true');
+  _sheetBg.classList.add('is-open');
+  _sheet.classList.add('is-open');
+
+  // Prevenir scroll del body mientras el sheet está abierto
+  document.body.style.overflow = 'hidden';
+
+  // Foco al primer input del formulario del sheet
+  requestAnimationFrame(() => {
+    _sheet.querySelector('input[type="email"]')?.focus();
+  });
+}
+
+/**
+ * Cierra el bottom sheet de login (móvil).
+ */
+function _closeLoginSheet() {
+  if (!_sheet) return;
+
+  _sheet.classList.remove('is-open');
+  _sheetBg.classList.remove('is-open');
+  document.body.style.overflow = '';
+
+  // Restaurar foco al trigger
+  if (_lastTrigger) {
+    _lastTrigger.setAttribute('aria-expanded', 'false');
+    _lastTrigger.focus();
+  }
+}
+
+
+// ════════════════════════════════════════════════════════
+// 5. HANDLERS DE AUTENTICACIÓN
+// ════════════════════════════════════════════════════════
+
+/**
+ * Inicia sesión con Google.
+ * Al completarse correctamente el popup, Firebase dispara onAuthChange,
+ * que llama a _renderUserMenu() y limpia toda la UI de login.
+ */
 async function _handleLogin() {
   try {
     await FirebaseService.signInWithGoogle();
   } catch (err) {
-    console.error('[AuthController] Error al iniciar sesión:', err);
+    console.error('[AuthController] Error al iniciar sesión con Google:', err);
   }
 }
 
+/**
+ * Validaciones locales reutilizables.
+ * Separadas de _validateEmail/_validatePassword globales para
+ * mantener SRP (cada handler tiene sus propios callbacks de error).
+ */
 function _validateEmail(email) {
   return typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
@@ -414,56 +697,84 @@ function _validatePassword(pw) {
     && /\d/.test(pw);
 }
 
-function _showAuthError(msg) {
-  const el = document.getElementById('authError');
-  if (el) { el.textContent = msg; el.style.display = 'block'; }
-}
-
-function _clearAuthError() {
-  const el = document.getElementById('authError');
-  if (el) { el.textContent = ''; el.style.display = 'none'; }
-}
-
-async function _handleEmailLogin() {
+/**
+ * Login con email/password usando callbacks del formulario local.
+ * Al cerrar sesión satisfactoriamente, el sheet/dropdown se cierra
+ * automáticamente vía _onAuthChange → _renderUserMenu.
+ *
+ * @param {()=>string} getEmail
+ * @param {()=>string} getPw
+ * @param {(msg:string)=>void} showErr
+ * @param {()=>void} clearErr
+ */
+async function _handleEmailLoginLocal(getEmail, getPw, showErr, clearErr) {
   try {
-    _clearAuthError();
-    const email = document.getElementById('authEmail')?.value.trim() ?? '';
-    const pw    = document.getElementById('authPassword')?.value ?? '';
-    if (!_validateEmail(email)) { _showAuthError('Correo inválido.'); return; }
-    if (pw.length < 1) { _showAuthError('Ingresá tu contraseña.'); return; }
+    clearErr();
+    const email = getEmail();
+    const pw    = getPw();
+
+    if (!_validateEmail(email)) { showErr('Correo inválido.'); return; }
+    if (pw.length < 1)          { showErr('Ingresá tu contraseña.'); return; }
+
     await FirebaseService.signInWithEmailPassword(email, pw);
+    // El sheet/dropdown se cierra automáticamente al dispararse _onAuthChange
+    _closeLoginSheet();
+
   } catch (err) {
-    _showAuthError('No se pudo iniciar sesión. Verificá tus datos.');
+    showErr('No se pudo iniciar sesión. Verificá tus datos.');
     console.error('[AuthController] Email login error:', err);
   }
 }
 
-async function _handleEmailSignup() {
+/**
+ * Registro con email/password.
+ * @param {()=>string} getEmail
+ * @param {()=>string} getPw
+ * @param {(msg:string)=>void} showErr
+ * @param {()=>void} clearErr
+ */
+async function _handleEmailSignupLocal(getEmail, getPw, showErr, clearErr) {
   try {
-    _clearAuthError();
-    const email = document.getElementById('authEmail')?.value.trim() ?? '';
-    const pw    = document.getElementById('authPassword')?.value ?? '';
-    if (!_validateEmail(email)) { _showAuthError('Correo inválido.'); return; }
-    if (!_validatePassword(pw)) {
-      _showAuthError('Contraseña insegura. Usá 8+ caracteres con mayúscula, minúscula y número.');
+    clearErr();
+    const email = getEmail();
+    const pw    = getPw();
+
+    if (!_validateEmail(email)) {
+      showErr('Correo inválido.');
       return;
     }
+    if (!_validatePassword(pw)) {
+      showErr('Contraseña insegura. Usá 8+ caracteres con mayúscula, minúscula y número.');
+      return;
+    }
+
     await FirebaseService.signUpWithEmailPassword(email, pw);
+    _closeLoginSheet();
+
   } catch (err) {
-    _showAuthError('No se pudo registrar. Es posible que el correo ya exista.');
+    showErr('No se pudo registrar. Es posible que el correo ya exista.');
     console.error('[AuthController] Signup error:', err);
   }
 }
 
-async function _handlePasswordReset() {
+/**
+ * Recuperación de contraseña por email.
+ * @param {()=>string} getEmail
+ * @param {(msg:string)=>void} showErr
+ * @param {()=>void} clearErr
+ */
+async function _handlePasswordResetLocal(getEmail, showErr, clearErr) {
   try {
-    _clearAuthError();
-    const email = document.getElementById('authEmail')?.value.trim() ?? '';
-    if (!_validateEmail(email)) { _showAuthError('Correo inválido.'); return; }
+    clearErr();
+    const email = getEmail();
+
+    if (!_validateEmail(email)) { showErr('Correo inválido.'); return; }
+
     await FirebaseService.resetPassword(email);
-    _showAuthError('Enviamos un correo de recuperación a tu bandeja de entrada.');
+    showErr('✅ Enviamos un correo de recuperación a tu bandeja de entrada.');
+
   } catch (err) {
-    _showAuthError('No se pudo enviar el correo de recuperación.');
+    showErr('No se pudo enviar el correo de recuperación.');
     console.error('[AuthController] Reset password error:', err);
   }
 }
@@ -506,16 +817,12 @@ function _markActivePrivacy(btnGroup, activeValue) {
 
 
 // ════════════════════════════════════════════════════════
-// 3. DROPDOWN HELPERS
+// 6. DROPDOWN HELPERS (menú de usuario autenticado)
 // ════════════════════════════════════════════════════════
 
 function _toggleDropdown(trigger, dropdown) {
   const isOpen = !dropdown.hidden;
-  if (isOpen) {
-    _closeDropdown(trigger, dropdown);
-  } else {
-    _openDropdown(trigger, dropdown);
-  }
+  isOpen ? _closeDropdown(trigger, dropdown) : _openDropdown(trigger, dropdown);
 }
 
 function _openDropdown(trigger, dropdown) {
@@ -533,7 +840,7 @@ function _closeDropdown(trigger, dropdown) {
 
 
 // ════════════════════════════════════════════════════════
-// 4. SINCRONIZACIÓN BIBLIOTECA LOCAL → FIRESTORE
+// 7. SINCRONIZACIÓN BIBLIOTECA LOCAL → FIRESTORE
 // ════════════════════════════════════════════════════════
 
 /**
@@ -595,13 +902,19 @@ async function _syncLibraryOnLogin(uid) {
 
 
 // ════════════════════════════════════════════════════════
-// 5. CALLBACK DE CAMBIO DE AUTENTICACIÓN
+// 8. CALLBACK DE CAMBIO DE AUTENTICACIÓN
 // ════════════════════════════════════════════════════════
 
 /**
+ * Se dispara cuando Firebase detecta un cambio de sesión.
  * @param {{uid,displayName,photoURL,email}|null} user
  */
 async function _onAuthChange(user) {
+  // Cerrar sheet si está abierto (el usuario acaba de iniciar sesión)
+  if (_sheet?.classList.contains('is-open')) {
+    _closeLoginSheet();
+  }
+
   if (user) {
     _renderUserMenu(user);
     await _syncLibraryOnLogin(user.uid);
@@ -633,7 +946,7 @@ async function _onAuthChange(user) {
 
 
 // ════════════════════════════════════════════════════════
-// 6. INICIALIZACIÓN
+// 9. INICIALIZACIÓN
 // ════════════════════════════════════════════════════════
 
 function init() {

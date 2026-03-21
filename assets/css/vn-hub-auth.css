@@ -1,0 +1,437 @@
+/* ════════════════════════════════════════════════════════════════
+   VN-HUB — vn-hub-auth.css
+   Estilos del sistema de login: dropdown (desktop) + bottom sheet (móvil)
+
+   ARQUITECTURA:
+    - Desktop (> 767px): .vh-login-dropdown  → panel absoluto bajo el botón
+    - Móvil  (≤ 767px):  .vh-login-sheet     → modal deslizable desde abajo
+    - Elementos compartidos: formulario, campos, botones de acción
+   ════════════════════════════════════════════════════════════════ */
+
+
+/* ────────────────────────────────────────────────────────────────
+   1. DROPDOWN — Desktop (> 767px)
+   Se posiciona absoluto respecto al wrapper del botón trigger.
+──────────────────────────────────────────────────────────────── */
+
+.vh-login-dropdown {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 300;
+
+  min-width: 320px;
+  max-width: 360px;
+
+  background: var(--vh-bg-surface);
+  backdrop-filter: var(--vh-glass-blur);
+  -webkit-backdrop-filter: var(--vh-glass-blur);
+  border: 1.5px solid var(--vh-border);
+  border-radius: var(--vh-radius-lg);
+  box-shadow: var(--vh-shadow-lg);
+  padding: 1.5rem;
+
+  animation: vhLoginDropIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.vh-login-dropdown[hidden] {
+  display: none;
+}
+
+@keyframes vhLoginDropIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.97);
+    transform-origin: top right;
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Garantía: en móvil el dropdown nunca debe mostrarse */
+@media (max-width: 767px) {
+  .vh-login-dropdown {
+    display: none !important;
+  }
+}
+
+
+/* ────────────────────────────────────────────────────────────────
+   2. BOTTOM SHEET — Móvil (≤ 767px)
+   Overlay oscuro + panel deslizable desde abajo.
+   En desktop el sheet existe en el DOM pero permanece invisible.
+──────────────────────────────────────────────────────────────── */
+
+/* Overlay oscuro detrás del sheet */
+.vh-login-sheet-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 600;
+  background: rgba(0, 0, 0, 0);
+  backdrop-filter: blur(0px);
+  -webkit-backdrop-filter: blur(0px);
+  pointer-events: none;
+  transition:
+    background  0.32s ease,
+    backdrop-filter 0.32s ease;
+}
+
+.vh-login-sheet-bg.is-open {
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  pointer-events: auto;
+}
+
+/* Panel principal del sheet */
+.vh-login-sheet {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 601;
+
+  background: var(--vh-bg-surface);
+  border-top: 1.5px solid var(--vh-border);
+  border-radius: var(--vh-radius-xl) var(--vh-radius-xl) 0 0;
+  box-shadow: 0 -8px 40px rgba(0, 0, 0, 0.22);
+
+  /* Altura máxima: 90% de la ventana para dejar espacio visual arriba */
+  max-height: 90dvh;
+  max-height: 90vh; /* fallback */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+
+  /* Padding extra en la parte inferior para el safe-area (notch/barra home) */
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1.5rem);
+
+  /* Estado inicial: fuera de pantalla */
+  transform: translateY(100%);
+  transition: transform 0.38s cubic-bezier(0.32, 0.72, 0, 1);
+  will-change: transform;
+}
+
+.vh-login-sheet.is-open {
+  transform: translateY(0);
+}
+
+/* En desktop el sheet nunca debe ser visible */
+@media (min-width: 768px) {
+  .vh-login-sheet,
+  .vh-login-sheet-bg {
+    display: none !important;
+  }
+}
+
+
+/* ────────────────────────────────────────────────────────────────
+   3. COMPONENTES INTERNOS DEL SHEET
+──────────────────────────────────────────────────────────────── */
+
+/* Handle visual de arrastre (decorativo, no arrastra) */
+.vh-login-sheet__handle {
+  width: 40px;
+  height: 4px;
+  border-radius: var(--vh-radius-full);
+  background: var(--vh-border);
+  margin: 0.85rem auto 0;
+  flex-shrink: 0;
+}
+
+/* Header: título + botón cerrar */
+.vh-login-sheet__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.5rem 0.75rem;
+  border-bottom: 1px solid var(--vh-border);
+}
+
+.vh-login-sheet__title {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--vh-text-primary);
+  margin: 0;
+}
+
+.vh-login-sheet__close {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1.5px solid var(--vh-border);
+  background: var(--vh-bg-elevated);
+  color: var(--vh-text-muted);
+  font-size: 0.95rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--vh-transition);
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  flex-shrink: 0;
+}
+
+.vh-login-sheet__close:hover,
+.vh-login-sheet__close:focus-visible {
+  border-color: var(--vh-danger);
+  color: var(--vh-danger);
+  background: var(--vh-danger-bg);
+}
+
+.vh-login-sheet__close:focus-visible {
+  outline: 2px solid var(--vh-danger);
+  outline-offset: 2px;
+}
+
+/* Cuerpo del sheet: contiene el formulario */
+.vh-login-sheet__body {
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+
+/* ────────────────────────────────────────────────────────────────
+   4. FORMULARIO COMPARTIDO (dropdown + sheet)
+   Estilos independientes del contenedor para DRY.
+──────────────────────────────────────────────────────────────── */
+
+/* Botón de Google — ancho completo en ambos contextos */
+.vh-login-google-btn {
+  width: 100% !important;
+  justify-content: center !important;
+  margin-bottom: 0 !important;
+  min-height: 44px;
+  font-size: 0.95rem;
+  padding: 0.7rem 1.25rem;
+  border-radius: var(--vh-radius-full);
+  border: 1.5px solid var(--vh-accent);
+  background: var(--vh-accent-soft);
+  color: var(--vh-accent);
+  font-family: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--vh-transition);
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.vh-login-google-btn:hover {
+  background: var(--vh-accent);
+  color: var(--vh-text-on-accent);
+  box-shadow: var(--vh-shadow-accent);
+}
+
+.vh-login-google-btn:active {
+  transform: scale(0.97);
+}
+
+/* Separador "o" entre Google y email */
+.vh-login-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--vh-text-muted);
+  font-size: 0.78rem;
+  font-weight: 500;
+  margin: 0.25rem 0;
+}
+
+.vh-login-divider span:first-child,
+.vh-login-divider span:last-child {
+  flex: 1;
+  height: 1px;
+  background: var(--vh-border);
+  display: block;
+}
+
+.vh-login-divider span:nth-child(2) {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* Wrapper input de contraseña con botón ojo */
+.vh-field__pw-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.vh-field__pw-wrap .vh-field__input {
+  width: 100%;
+  padding-right: 2.75rem; /* espacio para el botón ojo */
+}
+
+/* Botón mostrar/ocultar contraseña */
+.vh-field__pw-eye {
+  position: absolute;
+  right: 0.65rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: var(--vh-text-muted);
+  cursor: pointer;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--vh-radius-sm);
+  transition: color var(--vh-transition), background var(--vh-transition);
+  opacity: 0.5;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  flex-shrink: 0;
+}
+
+.vh-field__pw-eye:hover,
+.vh-field__pw-eye:focus-visible {
+  color: var(--vh-accent);
+  opacity: 1;
+  background: var(--vh-accent-soft);
+}
+
+.vh-field__pw-eye:focus-visible {
+  outline: 2px solid var(--vh-accent);
+  outline-offset: 1px;
+}
+
+/* Mensaje de error / feedback bajo el campo de contraseña */
+.vh-auth-error {
+  font-size: 0.82rem;
+  line-height: 1.4;
+  margin-top: 0.35rem;
+  padding: 0.4rem 0.6rem;
+  border-radius: var(--vh-radius-sm);
+}
+
+/* Error real (rojo) */
+.vh-auth-error:not(:empty):not([style*="display: none"]) {
+  color: var(--vh-danger);
+  background: var(--vh-danger-bg);
+  border: 1px solid rgba(220, 38, 38, 0.18);
+}
+
+/* Éxito (recuperación de contraseña) — texto empieza con ✅ */
+.vh-auth-error[style*="block"]:not(:empty) {
+  /* La lógica de color se controla inline desde JS según el prefijo ✅ */
+}
+
+/* Bloque de acciones: Iniciar sesión + Registrarse */
+.vh-login-actions {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  margin-top: 0.25rem;
+}
+
+.vh-login-actions .vh-btn {
+  flex: 1;
+  min-height: 44px;
+  justify-content: center;
+  font-size: 0.9rem;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Botón de recuperar contraseña — discreto, ocupa todo el ancho */
+.vh-login-reset-btn {
+  width: 100%;
+  justify-content: center;
+  font-size: 0.78rem;
+  color: var(--vh-text-muted);
+  border-color: transparent;
+  background: transparent;
+  padding: 0.35rem;
+  min-height: 36px;
+  letter-spacing: 0;
+}
+
+.vh-login-reset-btn:hover {
+  color: var(--vh-accent);
+  background: var(--vh-accent-soft);
+  border-color: transparent;
+}
+
+
+/* ────────────────────────────────────────────────────────────────
+   5. AJUSTES RESPONSIVOS ADICIONALES
+──────────────────────────────────────────────────────────────── */
+
+/* Pantallas muy pequeñas: campos más compactos */
+@media (max-width: 360px) {
+  .vh-login-sheet__body {
+    padding: 1rem 1rem 1.25rem;
+  }
+
+  .vh-login-actions {
+    flex-direction: column;
+  }
+
+  .vh-login-actions .vh-btn {
+    width: 100%;
+  }
+}
+
+/* Tablets en modo landscape con bottom bar: ajuste de max-height */
+@media (max-width: 767px) and (orientation: landscape) {
+  .vh-login-sheet {
+    max-height: 95dvh;
+    max-height: 95vh;
+  }
+}
+
+
+/* ────────────────────────────────────────────────────────────────
+   6. DARK MODE
+──────────────────────────────────────────────────────────────── */
+
+[data-theme="dark"] .vh-login-sheet {
+  box-shadow: 0 -8px 48px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.18);
+}
+
+[data-theme="dark"] .vh-login-divider span:first-child,
+[data-theme="dark"] .vh-login-divider span:last-child {
+  background: var(--vh-border);
+}
+
+[data-theme="dark"] .vh-auth-error:not(:empty):not([style*="display: none"]) {
+  background: rgba(248, 113, 113, 0.1);
+  border-color: rgba(248, 113, 113, 0.22);
+  color: #f87171;
+}
+
+
+/* ────────────────────────────────────────────────────────────────
+   7. ACCESIBILIDAD
+──────────────────────────────────────────────────────────────── */
+
+.vh-login-google-btn:focus-visible,
+.vh-login-reset-btn:focus-visible {
+  outline: 2px solid var(--vh-accent);
+  outline-offset: 2px;
+}
+
+/* Input con error marcado via aria-invalid */
+.vh-field__input[aria-invalid="true"] {
+  border-color: var(--vh-danger);
+  box-shadow: 0 0 0 3px var(--vh-danger-bg);
+}
+
+/* Reducir animaciones si el usuario lo prefiere */
+@media (prefers-reduced-motion: reduce) {
+  .vh-login-sheet,
+  .vh-login-sheet-bg,
+  .vh-login-dropdown {
+    transition: none;
+    animation: none;
+  }
+}
