@@ -296,21 +296,79 @@ function _activateTab(tabStatus) {
 /**
  * Renderiza todos los paneles de la biblioteca e inyecta los botones
  * de exportación en cada sección de estado.
+ *
+ * CORRECCIÓN BUG-RENDER-01 — Peticiones paralelas duplicadas a VNDB:
+ * ─────────────────────────────────────────────────────────────────
+ *  CAUSA:
+ *   _renderLibrary() llamaba a _renderPanel() 5 veces sin await.
+ *   Cada llamada es async y todas comparten _state.vnCache.
+ *   Al ejecutarse en paralelo, todas leían vnCache vacío ANTES de que
+ *   cualquiera guardara resultados, generando 5 peticiones idénticas
+ *   a VNDB con los mismos IDs al mismo tiempo.
+ *   Si esas peticiones fallaban (CORS en localhost, red cortada, etc.),
+ *   el fallback a getLocalMetaSnapshot() devolvía los mismos datos
+ *   a todos los paneles, que los renderizaban multiplicados.
+ *
+ *  SOLUCIÓN — dos pasos:
+ *   1. Pre-poblar vnCache ANTES de renderizar:
+ *      Se recolectan todos los IDs únicos de todos los paneles,
+ *      se hace UNA SOLA petición a VNDB, y se puebla el caché.
+ *      Cuando los paneles renderizan, todos leen del caché ya lleno.
+ *
+ *   2. Los _renderPanel() pueden ejecutarse en paralelo sin riesgo
+ *      porque ya no hacen peticiones de red — solo leen el caché.
  */
-function _renderLibrary() {
+async function _renderLibrary() {
   const stats = LibraryStore.getStats();
   RenderEngine.updateTabCounts(stats);
   RenderEngine.updateLibraryStats(stats);
 
-  _renderPanel('all',      LibraryStore.getEntriesByStatus(null));
-  _renderPanel('pending',  LibraryStore.getEntriesByStatus(VN_STATUS.PENDING));
-  _renderPanel('playing',  LibraryStore.getEntriesByStatus(VN_STATUS.PLAYING));
-  _renderPanel('finished', LibraryStore.getEntriesByStatus(VN_STATUS.FINISHED));
-  _renderPanel('dropped',  LibraryStore.getEntriesByStatus(VN_STATUS.DROPPED));
+  // ── Paso 1: recolectar todos los IDs únicos sin caché ──────────
+  const allEntries    = LibraryStore.getEntriesByStatus(null);
+  const uncachedIds   = [...new Set(
+    allEntries
+      .map(e => e.vnId)
+      .filter(id => !_state.vnCache.has(id))
+  )];
+
+  // ── Paso 2: UNA SOLA petición para todos los IDs faltantes ─────
+  if (uncachedIds.length > 0) {
+    try {
+      const vnList = await VndbService.getVnsByIds(uncachedIds);
+      vnList.forEach(vn => _state.vnCache.set(vn.id, vn));
+    } catch (err) {
+      console.warn('[UI] No se pudieron cargar metadatos de biblioteca:', err);
+      // Fallback: usar snapshots locales si existen
+      uncachedIds.forEach(id => {
+        if (_state.vnCache.has(id)) return; // ya en caché (parcial)
+        const snap = VndbService.getLocalMetaSnapshot?.(id);
+        if (snap) _state.vnCache.set(id, snap);
+      });
+    }
+  }
+
+  // ── Paso 3: renderizar todos los paneles (el caché ya está listo) ──
+  // Se pueden ejecutar en paralelo con seguridad porque ya no hacen
+  // peticiones de red — solo leen _state.vnCache que está poblado.
+  await Promise.all([
+    _renderPanel('all',      LibraryStore.getEntriesByStatus(null)),
+    _renderPanel('pending',  LibraryStore.getEntriesByStatus(VN_STATUS.PENDING)),
+    _renderPanel('playing',  LibraryStore.getEntriesByStatus(VN_STATUS.PLAYING)),
+    _renderPanel('finished', LibraryStore.getEntriesByStatus(VN_STATUS.FINISHED)),
+    _renderPanel('dropped',  LibraryStore.getEntriesByStatus(VN_STATUS.DROPPED)),
+  ]);
 
   _injectExportButtons(stats);
 }
 
+/**
+ * Renderiza un panel específico de la biblioteca.
+ * PRECONDICIÓN: _state.vnCache debe estar poblado antes de llamar
+ * esta función. _renderLibrary() se encarga de eso en el Paso 2.
+ *
+ * @param {string}   panelId  - Identificador del panel ('all', 'pending', etc.)
+ * @param {object[]} entries  - LibraryEntries para este panel
+ */
 async function _renderPanel(panelId, entries) {
   const grid       = _dom.panelGrids[panelId];
   const emptyState = _dom.emptyStates[panelId];
@@ -325,30 +383,24 @@ async function _renderPanel(panelId, entries) {
 
   if (emptyState) emptyState.hidden = true;
 
-  const uncachedIds = entries
-    .map(e => e.vnId)
-    .filter(id => !_state.vnCache.has(id));
-
-  if (uncachedIds.length > 0) {
-    try {
-      const vnList = await VndbService.getVnsByIds(uncachedIds);
-      vnList.forEach(vn => _state.vnCache.set(vn.id, vn));
-    } catch (err) {
-      console.warn('[UI] No se pudieron cargar metadatos:', err);
-      uncachedIds.forEach(id => {
-        const snap = VndbService.getLocalMetaSnapshot?.(id);
-        if (snap) _state.vnCache.set(id, snap);
-      });
-    }
-  }
+  // NOTA: ya no se hacen peticiones de red aquí.
+  // _renderLibrary() pre-pobló el caché en el Paso 2.
+  // Si algún ID no está en el caché (caso extremo: ID nuevo
+  // agregado entre el Paso 2 y el renderizado), se muestra
+  // con título de fallback para no romper el render.
 
   const fragment = document.createDocumentFragment();
 
   entries.forEach((libraryEntry, index) => {
     const vnEntry = _state.vnCache.get(libraryEntry.vnId) ?? {
-      id: libraryEntry.vnId, title: libraryEntry.vnId,
-      imageUrl: '', imageIsAdult: false,
-      rating: 'N/A', released: '', tags: [], developers: [],
+      id:          libraryEntry.vnId,
+      title:       libraryEntry.vnId,
+      imageUrl:    '',
+      imageIsAdult: false,
+      rating:      'N/A',
+      released:    '',
+      tags:        [],
+      developers:  [],
     };
     fragment.appendChild(RenderEngine.createLibraryCard(vnEntry, libraryEntry, index));
   });

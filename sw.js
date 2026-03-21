@@ -2,14 +2,38 @@
  * @file sw.js
  * @description Service Worker para VN-Hub.
  *
+ * CAMBIOS v3 — Optimización de carga de imágenes:
+ * ─────────────────────────────────────────────────────────────────
+ *  PROBLEMA (v2):
+ *   _networkFirstImages() siempre hacía una petición de red antes de
+ *   consultar el caché. Esto significaba que cada imagen, aunque ya
+ *   estuviera almacenada localmente, generaba latencia de red antes de
+ *   mostrarse. En conexiones lentas (3G/4G variable) este era el
+ *   cuello de botella principal de la lentitud de imágenes.
  *
- * @version 2.0
+ *  SOLUCIÓN:
+ *   Las imágenes de VNDB ahora usan estrategia CACHE-FIRST:
+ *    1. Buscar en caché local → si existe, devolver inmediatamente (0ms).
+ *    2. Si no está en caché → ir a la red, guardar y devolver.
+ *   Las imágenes de portada no cambian con el tiempo (son estáticas
+ *   por diseño en VNDB), por lo que Cache-First es seguro y óptimo.
+ *
+ *  TTL DEL CACHÉ DE IMÁGENES:
+ *   Se añade un header X-Cached-At para poder expirar imágenes después
+ *   de IMAGE_CACHE_TTL_DAYS días. Esto previene que portadas
+ *   actualizadas en VNDB queden obsoletas indefinidamente.
+ *
+ *  LÍMITE DE ENTRADAS:
+ *   Se aumenta MAX_IMAGE_CACHE_ENTRIES de 150 a 300 para reducir
+ *   la frecuencia de purgas (cada purga fuerza una petición de red).
+ *
+ * @version 3.0
  */
 
 'use strict';
 
 
-const CACHE_VERSION = 'v2';
+const CACHE_VERSION = 'v3';
 const SHELL_CACHE   = `vnh-shell-${CACHE_VERSION}`;
 const IMAGES_CACHE  = `vnh-images-${CACHE_VERSION}`;
 const API_CACHE     = `vnh-api-${CACHE_VERSION}`;
@@ -19,26 +43,33 @@ const API_CACHE     = `vnh-api-${CACHE_VERSION}`;
 // CONFIGURACIÓN
 // ─────────────────────────────────────────────
 
-/** Máximo de imágenes en caché antes de purgar el 10% más antiguo. */
-const MAX_IMAGE_CACHE_ENTRIES = 150;
+/**
+ * Máximo de imágenes en caché antes de purgar el 10% más antiguo.
+ * Aumentado de 150 → 300 para reducir purgas innecesarias.
+ * Una portada promedio pesa ~40-80 KB → 300 entradas ≈ 12-24 MB.
+ */
+const MAX_IMAGE_CACHE_ENTRIES = 300;
 
 /** TTL para respuestas de la API VNDB (segundos). */
 const API_CACHE_TTL_SECONDS = 300;
 
+/**
+ * TTL para imágenes cacheadas (días).
+ * Después de este tiempo, la siguiente visita refresca la imagen
+ * desde la red aunque esté en caché. Valor: 30 días.
+ */
+const IMAGE_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
+
 
 // ─────────────────────────────────────────────
 // SHELL ASSETS — Lista exhaustiva
-//
-// REGLA: Todo archivo importado por app-init.js
-// (directa o transitivamente) DEBE estar aquí.
-// Si no está, el SW no puede servir la app offline.
 // ─────────────────────────────────────────────
 
 const SHELL_ASSETS = [
   // ── Páginas HTML ───────────────────────────
   './',
   './index.html',
-  './novel-details.html',   // ← faltaba en v1
+  './novel-details.html',
 
   // ── CSS ────────────────────────────────────
   './assets/css/vn-hub.css',
@@ -47,42 +78,43 @@ const SHELL_ASSETS = [
   './assets/css/vn-hub-export.css',
   './assets/css/vn-hub-profile.css',
   './assets/css/vn-hub-mobile.css',
-  './assets/css/vn-hub-details.css',   // ← faltaba en v1
+  './assets/css/vn-hub-details.css',
+  './assets/css/vn-hub-auth.css',
 
   // ── JS: núcleo ─────────────────────────────
   './js/app-init.js',
   './js/constants.js',
-  './js/utils.js',                     // ← faltaba en v1
+  './js/utils.js',
   './js/render-engine.js',
   './js/ui-controller.js',
 
   // ── JS: servicios ──────────────────────────
-  './js/vndb-service.js',              // ← faltaba en v1
-  './js/firebase-service.js',          // ← faltaba en v1
-  './js/library-store.js',             // ← faltaba en v1
-  './js/score-engine.js',              // ← faltaba en v1
+  './js/vndb-service.js',
+  './js/firebase-service.js',
+  './js/library-store.js',
+  './js/score-engine.js',
 
   // ── JS: controladores ──────────────────────
-  './js/auth-controller.js',           // ← faltaba en v1
+  './js/auth-controller.js',
   './js/feed-controller.js',
   './js/profile-controller.js',
   './js/explore-controller.js',
   './js/mobile-gestures.js',
-  './js/novel-details.js',             // ← faltaba en v1
+  './js/novel-details.js',
 
   // ── JS: traducciones ───────────────────────
-  './js/translation-service.js',       // ← faltaba en v1
-  './js/translation-tags.js',          // ← faltaba en v1 (164 KB — crítico offline)
+  './js/translation-service.js',
+  './js/translation-tags.js',
 
   // ── JS: modales ────────────────────────────
-  './js/modal-review.js',              // ← faltaba en v1
-  './js/modal-log.js',                 // ← faltaba en v1
-  './js/modal-comment.js',             // ← faltaba en v1
-  './js/modal-delete.js',              // ← faltaba en v1
-  './js/modal-export.js',              // ← faltaba en v1
+  './js/modal-review.js',
+  './js/modal-log.js',
+  './js/modal-comment.js',
+  './js/modal-delete.js',
+  './js/modal-export.js',
 
   // ── JS: extensiones ────────────────────────
-  './js/firebase-profile-ext.js',      // ← faltaba en v1
+  './js/firebase-profile-ext.js',
 
   // ── PWA ────────────────────────────────────
   './manifest.json',
@@ -108,15 +140,13 @@ const FALLBACK_IMAGE_SVG = `
 // ═══════════════════════════════════════════════════════════════
 
 self.addEventListener('install', (event) => {
-  console.info('[SW] Instalando v2…');
+  console.info('[SW] Instalando v3…');
 
   event.waitUntil(
     caches.open(SHELL_CACHE)
       .then(cache => cache.addAll(SHELL_ASSETS))
       .then(() => {
         console.info('[SW] Shell precacheado ✓');
-
-
         return self.skipWaiting();
       })
       .catch(err => {
@@ -169,9 +199,15 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // ── Imágenes VNDB → Network-First + fallback SVG ──────────
+  // ── Imágenes VNDB → Cache-First con TTL ───────────────────
+  //
+  // CAMBIO v3: Network-First → Cache-First
+  // Razón: las portadas de VNDB son estáticas (no cambian).
+  // Cache-First elimina la latencia de red en visitas posteriores.
+  // El TTL de 30 días garantiza que imágenes actualizadas en VNDB
+  // se refresquen eventualmente.
   if (url.hostname.includes('s2.vndb.org') || url.hostname.includes('t.vndb.org')) {
-    event.respondWith(_networkFirstImages(request, IMAGES_CACHE));
+    event.respondWith(_cacheFirstImages(request, IMAGES_CACHE));
     return;
   }
 
@@ -194,27 +230,23 @@ self.addEventListener('fetch', (event) => {
 // ═══════════════════════════════════════════════════════════════
 
 /**
- *
+ * Cache-First genérico (shell assets, fuentes).
  * @param {Request} request
  * @param {string}  cacheName
  * @returns {Promise<Response>}
  */
 async function _cacheFirst(request, cacheName) {
-  // 1. Intentar desde caché
   const cached = await caches.match(request);
   if (cached) return cached;
 
-  // 2. Si no hay caché, ir a la red
   try {
     const response = await fetch(request);
     if (response.ok) {
       const cache = await caches.open(cacheName);
-      // Guardamos un clon; el original se devuelve al navegador
       cache.put(request, response.clone());
     }
     return response;
   } catch {
-    // 3. Sin red y sin caché → respuesta de error controlada
     console.warn('[SW] Sin red y sin caché para:', request.url);
     return new Response('Recurso no disponible offline.', {
       status:  503,
@@ -224,51 +256,86 @@ async function _cacheFirst(request, cacheName) {
 }
 
 /**
- * Network-First para imágenes VNDB.
- * Con red: descarga, guarda en caché y devuelve la imagen real.
- * Sin red: sirve desde caché o fallback SVG.
+ * Cache-First para imágenes VNDB con TTL y límite de entradas.
  *
- * CORRECCIÓN BUG-05 (LRU):
- * En v1 se borraban las primeras entradas del array de claves,
- * que es el orden de inserción en el caché — no el de antigüedad real.
- * El caché de la API Cache no garantiza orden cronológico en keys().
- * Solución: guardar timestamp en el nombre de la entrada es complejo
- * en Cache API; la solución pragmática para GitHub Pages es mantener
- * el límite por conteo y aceptar que el orden es aproximado.
- * Para LRU real se necesitaría IndexedDB (fuera de scope aquí).
+ * FLUJO:
+ *  1. Buscar en caché → si existe Y no expiró → devolver (0ms extra).
+ *  2. Si expiró o no existe → fetch de red → guardar con timestamp.
+ *  3. Sin red y sin caché → placeholder SVG.
+ *
+ * VENTAJA vs Network-First anterior:
+ *  En la segunda visita a la misma página, las portadas aparecen
+ *  instantáneamente desde caché local sin ninguna petición HTTP.
  *
  * @param {Request} request
  * @param {string}  cacheName
  * @returns {Promise<Response>}
  */
-async function _networkFirstImages(request, cacheName) {
+async function _cacheFirstImages(request, cacheName) {
+  const cache  = await caches.open(cacheName);
+  const cached = await cache.match(request);
+
+  if (cached) {
+    // Verificar TTL: si no expiró, devolver desde caché
+    const cachedAt = cached.headers.get('X-Cached-At');
+    if (cachedAt) {
+      const ageMs = Date.now() - parseInt(cachedAt, 10);
+      if (ageMs <= IMAGE_CACHE_TTL_MS) {
+        // Imagen fresca en caché → respuesta instantánea
+        return cached;
+      }
+      // Imagen expirada → refrescar en background (stale-while-revalidate)
+      _refreshImageInBackground(request, cache);
+      return cached; // devolver la versión expirada mientras se refresca
+    }
+    // Sin timestamp (entradas de versión anterior) → devolver igual
+    return cached;
+  }
+
+  // No está en caché → fetch de red
+  return _fetchAndCacheImage(request, cache);
+}
+
+/**
+ * Descarga una imagen, la guarda en caché con timestamp y la devuelve.
+ * Si la red falla y no hay caché, devuelve el placeholder SVG.
+ *
+ * @param {Request}   request
+ * @param {Cache}     cache    - Instancia ya abierta del caché
+ * @returns {Promise<Response>}
+ */
+async function _fetchAndCacheImage(request, cache) {
   try {
     const response = await fetch(request);
 
     if (response.ok) {
-      const cache = await caches.open(cacheName);
+      // Inyectar timestamp para el TTL
+      const headers = new Headers(response.headers);
+      headers.set('X-Cached-At', String(Date.now()));
 
-      // Purgar si el caché supera el límite
-      const keys = await cache.keys();
-      if (keys.length >= MAX_IMAGE_CACHE_ENTRIES) {
-        const countToDelete = Math.ceil(MAX_IMAGE_CACHE_ENTRIES * 0.1);
-        await Promise.all(
-          keys.slice(0, countToDelete).map(k => cache.delete(k))
-        );
-        console.info(`[SW] Purgadas ${countToDelete} imágenes del caché.`);
-      }
+      const blob           = await response.blob();
+      const cachedResponse = new Response(blob, {
+        status:     response.status,
+        statusText: response.statusText,
+        headers,
+      });
 
-      cache.put(request, response.clone());
+      // Purgar si el caché supera el límite antes de guardar
+      await _pruneImageCache(cache);
+      cache.put(request, cachedResponse.clone());
+
+      // Devolver una Response fresca desde el mismo blob
+      return new Response(blob, {
+        status:     response.status,
+        statusText: response.statusText,
+        headers:    response.headers,
+      });
     }
 
     return response;
 
   } catch {
-    // Sin red: intentar desde caché
-    const cached = await caches.match(request);
-    if (cached) return cached;
-
-    // Sin caché: devolver placeholder SVG
+    // Sin red y sin caché → placeholder SVG
     return new Response(FALLBACK_IMAGE_SVG, {
       status:  200,
       headers: {
@@ -280,13 +347,69 @@ async function _networkFirstImages(request, cacheName) {
 }
 
 /**
+ * Refresca una imagen en segundo plano (stale-while-revalidate).
+ * No bloquea la respuesta al usuario — se ejecuta de forma asíncrona.
+ *
+ * @param {Request} request
+ * @param {Cache}   cache
+ */
+function _refreshImageInBackground(request, cache) {
+  // Fire-and-forget: no await intencional
+  fetch(request)
+    .then(async response => {
+      if (!response.ok) return;
+      const headers = new Headers(response.headers);
+      headers.set('X-Cached-At', String(Date.now()));
+      const cachedResponse = new Response(await response.blob(), {
+        status: response.status, statusText: response.statusText, headers,
+      });
+      await cache.put(request, cachedResponse);
+      console.debug('[SW] Imagen refrescada en background:', request.url);
+    })
+    .catch(() => {
+      // Silencioso: si falla, la versión expirada sigue sirviendo
+    });
+}
+
+/**
+ * Purga las entradas más antiguas si el caché supera MAX_IMAGE_CACHE_ENTRIES.
+ * Se llama ANTES de guardar una nueva entrada para mantener el límite.
+ *
+ * @param {Cache} cache - Instancia ya abierta del caché
+ */
+async function _pruneImageCache(cache) {
+  const keys = await cache.keys();
+  if (keys.length < MAX_IMAGE_CACHE_ENTRIES) return;
+
+  // Ordenar por X-Cached-At si está disponible, sino FIFO
+  const entries = await Promise.all(
+    keys.map(async key => {
+      const resp      = await cache.match(key);
+      const cachedAt  = resp?.headers?.get('X-Cached-At');
+      return { key, ts: cachedAt ? parseInt(cachedAt, 10) : 0 };
+    })
+  );
+
+  // Ordenar de más antiguo a más nuevo
+  entries.sort((a, b) => a.ts - b.ts);
+
+  // Eliminar el 10% más antiguo
+  const countToDelete = Math.ceil(MAX_IMAGE_CACHE_ENTRIES * 0.1);
+  await Promise.all(
+    entries.slice(0, countToDelete).map(e => cache.delete(e.key))
+  );
+
+  console.info(`[SW] Purgadas ${countToDelete} imágenes del caché (límite: ${MAX_IMAGE_CACHE_ENTRIES}).`);
+}
+
+/**
  * Network-First con TTL para la API VNDB.
  * Con red: descarga, guarda con timestamp y devuelve la respuesta.
  * Sin red: sirve desde caché si no expiró; si expiró o no hay, 503.
  *
  * @param {Request} request
  * @param {string}  cacheName
- * @param {number}  ttlSeconds - Tiempo de vida en segundos.
+ * @param {number}  ttlSeconds
  * @returns {Promise<Response>}
  */
 async function _networkFirst(request, cacheName, ttlSeconds) {
@@ -296,7 +419,6 @@ async function _networkFirst(request, cacheName, ttlSeconds) {
     const response = await fetch(request.clone());
 
     if (response.ok) {
-      // Inyectar timestamp para verificar TTL cuando estemos offline
       const headers = new Headers(response.headers);
       headers.set('X-Cached-At', String(Date.now()));
 
@@ -312,7 +434,6 @@ async function _networkFirst(request, cacheName, ttlSeconds) {
     return response;
 
   } catch {
-    // Sin red: verificar TTL del caché
     const cached = await cache.match(request);
 
     if (cached) {
@@ -326,21 +447,13 @@ async function _networkFirst(request, cacheName, ttlSeconds) {
         }
         console.warn('[SW] Caché de API expirado. No hay red.');
       } else {
-        // Sin timestamp: servir igual (beneficio de la duda)
         return cached;
       }
     }
 
-    // Sin red y sin caché válido
     return new Response(
-      JSON.stringify({
-        error:   'offline',
-        message: 'Sin conexión y sin caché disponible.',
-      }),
-      {
-        status:  503,
-        headers: { 'Content-Type': 'application/json' },
-      }
+      JSON.stringify({ error: 'offline', message: 'Sin conexión y sin caché disponible.' }),
+      { status: 503, headers: { 'Content-Type': 'application/json' } }
     );
   }
 }
