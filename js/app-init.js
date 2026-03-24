@@ -5,32 +5,33 @@
  * @description Punto de entrada único de VN-Hub.
  *              Orquesta la inicialización de todos los módulos en orden.
  *
- * CORRECCIÓN v3 — UiController.init is not a function:
+ * CORRECCIÓN v4 — _syncFeed() se disparaba durante la restauración inicial:
+ * ─────────────────────────────────────────────────────────────────────────
+ *  PROBLEMA:
+ *   auth-controller._syncLibraryOnLogin() restaura entradas desde Firestore
+ *   llamando a LibraryStore.addVn() / updateReview() / updateLog() etc.
+ *   Cada una de esas escrituras dispara el Observer del store con evento
+ *   'add' o 'update', que a su vez llamaba a FirebaseSync._syncFeed().
+ *   _syncFeed() comprueba: "¿el estado NO es finished? → removeFromFeed()".
+ *   Resultado: durante la carga inicial se intentaban borrar del feed
+ *   entradas en estado pending/playing/dropped que el usuario nunca tocó.
+ *   En la consola aparecía:
+ *     [FirebaseSync] Reseña de "vXXX" retirada del feed (estado: pending)
  *
- *  ui-controller.js NO exporta init(). Su inicialización ocurre mediante
- *  un bloque auto-init al final del módulo (patrón DOMContentLoaded).
- *  Llamar UiController.init() desde aquí lanzaba TypeError.
+ *  SOLUCIÓN — Flag `_isSyncing`:
+ *   FirebaseSync expone un flag booleano que auth-controller activa
+ *   ANTES de restaurar la biblioteca y desactiva AL TERMINAR.
+ *   Mientras el flag está activo, _onStoreEvent ignora los eventos
+ *   'add'/'update' para no disparar lógica de feed ni Firestore durante
+ *   una operación de restauración que ya proviene de Firestore.
  *
- *  explore-controller.js SÍ exporta init(), pero también tiene auto-init
- *  propio. Llamarlo explícitamente causaba doble inicialización (el mensaje
- *  "[ExploreController] inicializado" aparecía dos veces en consola).
+ *   IMPORTANTE: el flag NO suprime los eventos 'remove' (que sí son
+ *   intencionales incluso durante sincronización, aunque en la práctica
+ *   no ocurren). Solo silencia las escrituras reactivas al feed.
  *
- *  SOLUCIÓN: Para módulos con auto-init propio, basta con importarlos.
- *  El navegador evalúa el módulo al importarlo, ejecutando el auto-init.
- *  No se necesita llamar ninguna función adicional desde aquí.
- *
- *  MÓDULOS CON AUTO-INIT (solo importar, no llamar init()):
- *    - ui-controller.js      → init() interna, no exportada
- *    - explore-controller.js → init() exportada, pero tiene auto-init propio
- *
- *  MÓDULOS SIN AUTO-INIT (llamar init() explícitamente desde bootstrap):
- *    - LibraryStore, ThemeManager, AuthController, FirebaseSync
- *    - FeedController, ProfileController, MobileSystem
- *
- * FILOSOFÍA:
- *  - Este archivo NO contiene lógica de negocio.
- *  - Solo orquesta la secuencia de arranque.
- *  - Cada módulo falla de forma aislada (no bloquea los demás).
+ * CORRECCIÓN v3 (previa, mantenida):
+ *   UiController.init is not a function — ui-controller.js NO exporta
+ *   init(); se auto-inicializa. Solo importar es suficiente.
  */
 
 import * as ProfileController from './profile-controller.js';
@@ -93,12 +94,60 @@ const ThemeManager = {
 
 const FirebaseSync = {
 
+  /**
+   * Flag de sincronización inicial.
+   *
+   * PROPÓSITO:
+   *  Cuando auth-controller restaura la biblioteca desde Firestore,
+   *  cada escritura al store dispara el Observer con 'add'/'update'.
+   *  Sin este flag, _syncFeed() intentaría borrar del feed entradas
+   *  en estado pending/playing/dropped que el usuario nunca modificó.
+   *
+   *  Flujo correcto:
+   *    1. auth-controller llama FirebaseSync.beginSync() → _isSyncing = true
+   *    2. auth-controller restaura todas las entradas (addVn, updateReview…)
+   *    3. auth-controller llama FirebaseSync.endSync()   → _isSyncing = false
+   *    4. A partir de aquí, los eventos del store son acciones reales del
+   *       usuario y se procesan normalmente.
+   *
+   * @type {boolean}
+   */
+  _isSyncing: false,
+
+  /**
+   * Activa el modo de sincronización silenciosa.
+   * Llamar ANTES de restaurar entradas desde Firestore.
+   */
+  beginSync() {
+    this._isSyncing = true;
+  },
+
+  /**
+   * Desactiva el modo de sincronización silenciosa.
+   * Llamar DESPUÉS de que auth-controller termine de restaurar la biblioteca.
+   */
+  endSync() {
+    this._isSyncing = false;
+  },
+
   init() {
     LibraryStore.subscribe(this._onStoreEvent.bind(this));
   },
 
   async _onStoreEvent(event, payload) {
     if (!FirebaseService.isAuthenticated()) return;
+
+    // CORRECCIÓN v4:
+    // Durante la restauración inicial (_isSyncing = true), los eventos
+    // 'add'/'update' provienen de auth-controller reconstruyendo el store
+    // con datos ya persistidos en Firestore. No tiene sentido escribir de
+    // vuelta a Firestore ni modificar el feed en ese momento.
+    //
+    // Nota: 'remove' NO se suprime porque, aunque raro durante la sync,
+    // un remove siempre es intencional y no genera el ruido del feed.
+    if (this._isSyncing && (event === 'add' || event === 'update')) {
+      return;
+    }
 
     try {
       switch (event) {
@@ -132,6 +181,18 @@ const FirebaseSync = {
     }
   },
 
+  /**
+   * Sincroniza el feed con el estado actual de la entrada.
+   *
+   * REGLA DE NEGOCIO:
+   *  - Solo las entradas en estado FINISHED con reseña se publican en el feed.
+   *  - Si el estado cambia a cualquier otro (pending, playing, dropped),
+   *    se retira la reseña del feed si existía.
+   *  - Esta función solo se llama ante cambios REALES del usuario
+   *    (no durante la restauración inicial gracias al flag _isSyncing).
+   *
+   * @param {import('./library-store.js').LibraryEntry} entry
+   */
   async _syncFeed(entry) {
     if (entry.status !== VN_STATUS.FINISHED) {
       await FirebaseService.removeFromFeed(entry.vnId);
@@ -247,7 +308,7 @@ function _initMobileSystem() {
  *  1. LibraryStore      — fuente de verdad local, siempre primero
  *  2. ThemeManager      — evita FOUC antes del primer paint
  *  3. AuthController    — renderiza el header
- *  4. FirebaseSync      — se suscribe al store
+ *  4. FirebaseSync      — se suscribe al store (con flag _isSyncing disponible)
  *  5. FeedController    — feed de comunidad
  *  6. ProfileController — perfil de usuario
  *  NOTA: ui-controller y explore-controller ya corrieron su auto-init
@@ -271,6 +332,9 @@ function _bootstrap() {
   }
 
   // ── 3. Auth Controller
+  // IMPORTANTE: AuthController necesita acceso a FirebaseSync para usar
+  // beginSync()/endSync() durante _syncLibraryOnLogin(). FirebaseSync
+  // se expone vía la exportación de este módulo (ver abajo).
   try {
     AuthController.init();
   } catch (err) {
@@ -319,4 +383,11 @@ _bootstrap();
 // ════════════════════════════════════════════════════════
 // EXPORTACIÓN
 // ════════════════════════════════════════════════════════
-export { ThemeManager };
+
+/**
+ * ThemeManager — usado por ui-controller y novel-details para el toggle de tema.
+ * FirebaseSync — exportado para que auth-controller pueda llamar
+ *   beginSync()/endSync() y silenciar los eventos del store durante
+ *   la restauración inicial de la biblioteca desde Firestore.
+ */
+export { ThemeManager, FirebaseSync };

@@ -1,0 +1,98 @@
+/* ────────────────────────────────────────────────────────────────
+   VN-HUB — lazy-images.css
+   Estilos para carga diferida (lazy loading) de imágenes.
+
+   FLUJO:
+    1. LazyImageManager.init() añade la clase `.js-lazy-active` al <body>.
+    2. Las imágenes con [loading="lazy"] empiezan con opacity:0.
+    3. Cuando el IntersectionObserver detecta que la imagen entró al
+       viewport, añade `.is-loaded` → fade-in de 0.25s.
+    4. Sin JS (prefers-reduced-motion o IntersectionObserver no disponible),
+       las imágenes son visibles de inmediato (progressive enhancement).
+
+   IMPORTANTE:
+    Este archivo debe existir para que el <link rel="preload"> de index.html
+    no genere el warning "preloaded but not used within a few seconds".
+    El preload reserva la conexión HTTP; el onload convierte el link en
+    stylesheet tan pronto como el recurso descarga con éxito.
+──────────────────────────────────────────────────────────────── */
+
+/**
+ * Selector de alta especificidad deliberado:
+ *   .js-lazy-active   → JS activo y LazyImageManager inicializado
+ *   .vh-card__cover   → imágenes de portada en los grids de búsqueda/biblioteca
+ *   [loading="lazy"]  → solo imágenes marcadas para carga diferida
+ *   :not(.is-loaded)  → excluir las que ya terminaron de cargar
+ *
+ * La clase .vh-card__cover--adult ya tiene filter:blur(), que
+ * compite con opacity. Se aplica opacity por separado para no
+ * interferir con ese filtro.
+ */
+.js-lazy-active .vh-card__cover[loading="lazy"]:not(.is-loaded) {
+  opacity: 0;
+  /* Usar will-change para que el compositor de GPU gestione la transición
+     sin disparar layout/paint durante el fade-in */
+  will-change: opacity;
+}
+
+
+/* ════════════════════════════════════════════════════════════════
+   2. ESTADO CARGADO — fade-in al añadir .is-loaded
+   LazyImageManager añade esta clase en el callback onload del <img>.
+════════════════════════════════════════════════════════════════ */
+
+.js-lazy-active .vh-card__cover[loading="lazy"].is-loaded {
+  opacity: 1;
+  /* Transición rápida (0.25s): suficiente para percibir el aparecer
+     sin retrasar la sensación de carga de la tarjeta. */
+  transition: opacity 0.25s ease-in-out;
+  will-change: auto; /* liberar la capa de GPU al completarse */
+}
+
+
+/* ════════════════════════════════════════════════════════════════
+   3. SKELETON PLACEHOLDER — mientras la imagen lazy no ha cargado
+   Reutiliza el patrón de vh-skeleton para consistencia visual.
+════════════════════════════════════════════════════════════════ */
+
+.js-lazy-active .vh-card__cover-wrapper:has(> .vh-card__cover[loading="lazy"]:not(.is-loaded)) {
+  /* Pulso sutil en el wrapper para indicar carga en curso.
+     El selector :has() tiene soporte amplio desde 2023.
+     Sin soporte → el wrapper simplemente no pulsa (degradación segura). */
+  background: linear-gradient(
+    90deg,
+    var(--vh-bg-elevated, #f0f0f0)  25%,
+    var(--vh-border,      #e0e0e0)  50%,
+    var(--vh-bg-elevated, #f0f0f0)  75%
+  );
+  background-size: 200% 100%;
+  animation: vhLazySkeletonPulse 1.4s ease-in-out infinite;
+}
+
+@keyframes vhLazySkeletonPulse {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+
+/* ════════════════════════════════════════════════════════════════
+   4. ACCESIBILIDAD — Reducir movimiento
+   Si el usuario prefiere reducir animaciones, desactivar el fade
+   y mostrar la imagen inmediatamente al cargar.
+════════════════════════════════════════════════════════════════ */
+
+@media (prefers-reduced-motion: reduce) {
+  .js-lazy-active .vh-card__cover[loading="lazy"]:not(.is-loaded) {
+    /* Sin opacity:0 → la imagen aparece sin animación */
+    opacity: 1;
+    will-change: auto;
+  }
+
+  .js-lazy-active .vh-card__cover[loading="lazy"].is-loaded {
+    transition: none;
+  }
+
+  .js-lazy-active .vh-card__cover-wrapper:has(> .vh-card__cover[loading="lazy"]:not(.is-loaded)) {
+    animation: none;
+  }
+}

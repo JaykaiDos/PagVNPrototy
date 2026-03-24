@@ -4,35 +4,25 @@
  * @file js/auth-controller.js
  * @description Controlador de UI para autenticación.
  *
- * CAMBIOS v5 — Login móvil con Bottom Sheet:
+ * CAMBIOS v6 — Silenciar FirebaseSync durante restauración inicial:
  * ─────────────────────────────────────────────────────────────────
- *  PROBLEMA DETECTADO:
- *   En viewports ≤ 767px el panel de login usaba position:absolute
- *   con right:0 dentro del header comprimido. Al no haber espacio
- *   horizontal suficiente, el panel se desbordaba fuera de la pantalla
- *   o quedaba invisible. Además, el scroll interno del formulario
- *   (inputs de email/password) bloqueaba el gestor de scroll nativo
- *   del navegador móvil causando problemas de UX.
+ *  PROBLEMA (v5):
+ *   _syncLibraryOnLogin() restaura entradas desde Firestore llamando a
+ *   LibraryStore.addVn() / updateReview() / updateLog() / updateComment().
+ *   Cada una dispara el Observer del store → FirebaseSync._onStoreEvent()
+ *   → _syncFeed() → removeFromFeed() para todo lo que no sea 'finished'.
+ *   Resultado en consola:
+ *     [FirebaseSync] Reseña de "vXXX" retirada del feed (estado: pending)
  *
  *  SOLUCIÓN:
- *   Se introduce detección de viewport al abrir el panel.
- *   - Desktop (> 767px) → comportamiento anterior: dropdown bajo el botón.
- *   - Móvil  (≤ 767px)  → Bottom Sheet: modal deslizable desde abajo,
- *     con overlay oscuro semitransparente y handle visual de arrastre.
- *     El formulario se renderiza dentro del sheet con las mismas
- *     acciones que el dropdown (Google, email/password, recuperar).
+ *   Se importa FirebaseSync desde app-init.js y se llama a:
+ *     FirebaseSync.beginSync()  — antes del bucle de restauración
+ *     FirebaseSync.endSync()    — al terminar (en finally para garantía)
+ *   Mientras el flag está activo, _onStoreEvent ignora 'add'/'update'.
  *
- *  PRINCIPIOS APLICADOS:
- *   - SRP: _openLoginPanel() decide el modo; _openLoginDropdown() y
- *     _openLoginSheet() son responsables exclusivos de cada UI.
- *   - DRY: los campos y handlers del formulario se construyen una sola
- *     vez en _buildLoginForm() y se reutilizan en ambos modos.
- *   - Sin duplicación de listeners: el bottom sheet se crea lazy
- *     la primera vez y se reutiliza en llamadas posteriores.
- *
- * CAMBIOS v4 (previos, mantenidos):
- *  - _renderLoginButton(): formulario como dropdown desplegable.
- *  - FIX email login: stopPropagation en botones del formulario.
+ * CAMBIOS v5 (previos, mantenidos):
+ *  - Login móvil con Bottom Sheet.
+ *  - Formulario reutilizable _buildLoginForm() en dropdown y sheet.
  */
 
 import * as FirebaseService from './firebase-service.js';
@@ -118,10 +108,8 @@ function _renderLoginButton() {
     _lastTrigger = trigger;
 
     if (_isMobile()) {
-      // En móvil: SIEMPRE abrir el bottom sheet, nunca el dropdown
       _openLoginSheet(trigger);
     } else {
-      // En desktop: toggle del dropdown
       const isOpen = !panel.hidden;
       if (isOpen) {
         _closeLoginDropdown(panel, trigger);
@@ -344,9 +332,6 @@ function _buildSeparator() {
 
 /**
  * Construye el contenido del formulario de login.
- * Se llama tanto para el dropdown (desktop) como para el
- * bottom sheet (móvil), asegurando IDs únicos por contexto
- * para evitar colisiones en el DOM.
  *
  * @param {'dropdown'|'sheet'} context - Contexto de renderizado
  * @returns {DocumentFragment}
@@ -420,7 +405,6 @@ function _buildLoginForm(context) {
   pwLabel.htmlFor     = `authPassword${suffix}`;
   pwLabel.textContent = 'Contraseña';
 
-  // Wrapper para input + toggle de visibilidad
   const pwWrap = document.createElement('div');
   pwWrap.className = 'vh-field__pw-wrap';
 
@@ -431,7 +415,6 @@ function _buildLoginForm(context) {
   pwInput.autocomplete  = 'current-password';
   pwInput.placeholder   = '••••••••';
 
-  // Botón ojo para mostrar/ocultar contraseña
   const eyeBtn = document.createElement('button');
   eyeBtn.type      = 'button';
   eyeBtn.className = 'vh-field__pw-eye';
@@ -450,7 +433,6 @@ function _buildLoginForm(context) {
   pwWrap.appendChild(pwInput);
   pwWrap.appendChild(eyeBtn);
 
-  // Mensaje de error
   const errorMsg = document.createElement('p');
   errorMsg.className  = 'vh-field__hint vh-auth-error';
   errorMsg.id         = `authError${suffix}`;
@@ -484,12 +466,10 @@ function _buildLoginForm(context) {
   btnReset.id          = `btnResetPassword${suffix}`;
   btnReset.textContent = '¿Olvidaste tu contraseña?';
 
-  // stopPropagation para no cerrar el panel al hacer clic
   [btnLogin, btnSignup, btnReset].forEach(btn => {
     btn.addEventListener('click', (e) => e.stopPropagation());
   });
 
-  // Helpers para leer los campos de ESTE formulario específico
   const getEmail = () => emailInput.value.trim();
   const getPw    = () => pwInput.value;
   const showErr  = (msg) => {
@@ -503,11 +483,10 @@ function _buildLoginForm(context) {
     emailInput.removeAttribute('aria-invalid');
   };
 
-  btnLogin.addEventListener('click', () => _handleEmailLoginLocal(getEmail, getPw, showErr, clearErr));
+  btnLogin.addEventListener('click',  () => _handleEmailLoginLocal(getEmail, getPw, showErr, clearErr));
   btnSignup.addEventListener('click', () => _handleEmailSignupLocal(getEmail, getPw, showErr, clearErr));
-  btnReset.addEventListener('click', () => _handlePasswordResetLocal(getEmail, showErr, clearErr));
+  btnReset.addEventListener('click',  () => _handlePasswordResetLocal(getEmail, showErr, clearErr));
 
-  // Enter en contraseña dispara login
   pwInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.stopPropagation();
@@ -533,25 +512,14 @@ function _buildLoginForm(context) {
 // 3. DROPDOWN (desktop)
 // ════════════════════════════════════════════════════════
 
-/**
- * Abre el dropdown de login (desktop).
- * @param {HTMLElement} panel
- * @param {HTMLElement} trigger
- */
 function _openLoginDropdown(panel, trigger) {
   panel.hidden = false;
   trigger.setAttribute('aria-expanded', 'true');
-  // Foco al primer input del formulario
   requestAnimationFrame(() => {
     panel.querySelector('input[type="email"]')?.focus();
   });
 }
 
-/**
- * Cierra el dropdown de login (desktop).
- * @param {HTMLElement} panel
- * @param {HTMLElement} trigger
- */
 function _closeLoginDropdown(panel, trigger) {
   panel.hidden = true;
   trigger.setAttribute('aria-expanded', 'false');
@@ -562,32 +530,24 @@ function _closeLoginDropdown(panel, trigger) {
 // 4. BOTTOM SHEET (móvil)
 // ════════════════════════════════════════════════════════
 
-/**
- * Crea el bottom sheet la primera vez (lazy singleton).
- * Las llamadas posteriores reutilizan el elemento existente.
- */
 function _ensureSheet() {
   if (_sheet) return;
 
-  // ── Overlay semitransparente ──
   _sheetBg = document.createElement('div');
   _sheetBg.className = 'vh-login-sheet-bg';
   _sheetBg.setAttribute('aria-hidden', 'true');
   _sheetBg.addEventListener('click', _closeLoginSheet);
 
-  // ── Sheet container ──
   _sheet = document.createElement('div');
   _sheet.className = 'vh-login-sheet';
   _sheet.setAttribute('role', 'dialog');
   _sheet.setAttribute('aria-modal', 'true');
   _sheet.setAttribute('aria-label', 'Iniciar sesión');
 
-  // Handle visual de arrastre (decorativo)
   const handle = document.createElement('div');
   handle.className = 'vh-login-sheet__handle';
   handle.setAttribute('aria-hidden', 'true');
 
-  // Header del sheet
   const header = document.createElement('div');
   header.className = 'vh-login-sheet__header';
 
@@ -605,7 +565,6 @@ function _ensureSheet() {
   header.appendChild(title);
   header.appendChild(closeBtn);
 
-  // Cuerpo del sheet con el formulario
   const body = document.createElement('div');
   body.className = 'vh-login-sheet__body';
   body.appendChild(_buildLoginForm('sheet'));
@@ -617,7 +576,6 @@ function _ensureSheet() {
   document.body.appendChild(_sheetBg);
   document.body.appendChild(_sheet);
 
-  // Cerrar con Escape
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && _sheet?.classList.contains('is-open')) {
       _closeLoginSheet();
@@ -625,10 +583,6 @@ function _ensureSheet() {
   });
 }
 
-/**
- * Abre el bottom sheet de login (móvil).
- * @param {HTMLElement} trigger - Botón que disparó la apertura (para ARIA)
- */
 function _openLoginSheet(trigger) {
   _ensureSheet();
 
@@ -636,18 +590,13 @@ function _openLoginSheet(trigger) {
   _sheetBg.classList.add('is-open');
   _sheet.classList.add('is-open');
 
-  // Prevenir scroll del body mientras el sheet está abierto
   document.body.style.overflow = 'hidden';
 
-  // Foco al primer input del formulario del sheet
   requestAnimationFrame(() => {
     _sheet.querySelector('input[type="email"]')?.focus();
   });
 }
 
-/**
- * Cierra el bottom sheet de login (móvil).
- */
 function _closeLoginSheet() {
   if (!_sheet) return;
 
@@ -655,7 +604,6 @@ function _closeLoginSheet() {
   _sheetBg.classList.remove('is-open');
   document.body.style.overflow = '';
 
-  // Restaurar foco al trigger
   if (_lastTrigger) {
     _lastTrigger.setAttribute('aria-expanded', 'false');
     _lastTrigger.focus();
@@ -667,11 +615,6 @@ function _closeLoginSheet() {
 // 5. HANDLERS DE AUTENTICACIÓN
 // ════════════════════════════════════════════════════════
 
-/**
- * Inicia sesión con Google.
- * Al completarse correctamente el popup, Firebase dispara onAuthChange,
- * que llama a _renderUserMenu() y limpia toda la UI de login.
- */
 async function _handleLogin() {
   try {
     await FirebaseService.signInWithGoogle();
@@ -680,11 +623,6 @@ async function _handleLogin() {
   }
 }
 
-/**
- * Validaciones locales reutilizables.
- * Separadas de _validateEmail/_validatePassword globales para
- * mantener SRP (cada handler tiene sus propios callbacks de error).
- */
 function _validateEmail(email) {
   return typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
@@ -697,16 +635,6 @@ function _validatePassword(pw) {
     && /\d/.test(pw);
 }
 
-/**
- * Login con email/password usando callbacks del formulario local.
- * Al cerrar sesión satisfactoriamente, el sheet/dropdown se cierra
- * automáticamente vía _onAuthChange → _renderUserMenu.
- *
- * @param {()=>string} getEmail
- * @param {()=>string} getPw
- * @param {(msg:string)=>void} showErr
- * @param {()=>void} clearErr
- */
 async function _handleEmailLoginLocal(getEmail, getPw, showErr, clearErr) {
   try {
     clearErr();
@@ -717,7 +645,6 @@ async function _handleEmailLoginLocal(getEmail, getPw, showErr, clearErr) {
     if (pw.length < 1)          { showErr('Ingresá tu contraseña.'); return; }
 
     await FirebaseService.signInWithEmailPassword(email, pw);
-    // El sheet/dropdown se cierra automáticamente al dispararse _onAuthChange
     _closeLoginSheet();
 
   } catch (err) {
@@ -726,13 +653,6 @@ async function _handleEmailLoginLocal(getEmail, getPw, showErr, clearErr) {
   }
 }
 
-/**
- * Registro con email/password.
- * @param {()=>string} getEmail
- * @param {()=>string} getPw
- * @param {(msg:string)=>void} showErr
- * @param {()=>void} clearErr
- */
 async function _handleEmailSignupLocal(getEmail, getPw, showErr, clearErr) {
   try {
     clearErr();
@@ -757,12 +677,6 @@ async function _handleEmailSignupLocal(getEmail, getPw, showErr, clearErr) {
   }
 }
 
-/**
- * Recuperación de contraseña por email.
- * @param {()=>string} getEmail
- * @param {(msg:string)=>void} showErr
- * @param {()=>void} clearErr
- */
 async function _handlePasswordResetLocal(getEmail, showErr, clearErr) {
   try {
     clearErr();
@@ -787,11 +701,6 @@ async function _handleLogout() {
   }
 }
 
-/**
- * Maneja el cambio de privacidad del perfil.
- * @param {'public'|'friends'|'private'} privacy
- * @param {HTMLElement} btnGroup
- */
 async function _handlePrivacyChange(privacy, btnGroup) {
   try {
     await FirebaseService.updatePrivacy(privacy);
@@ -801,11 +710,6 @@ async function _handlePrivacyChange(privacy, btnGroup) {
   }
 }
 
-/**
- * Marca visualmente el botón de privacidad activo.
- * @param {HTMLElement} btnGroup
- * @param {string} activeValue
- */
 function _markActivePrivacy(btnGroup, activeValue) {
   btnGroup.querySelectorAll('[data-privacy]').forEach(btn => {
     btn.classList.toggle(
@@ -846,18 +750,43 @@ function _closeDropdown(trigger, dropdown) {
 /**
  * Al iniciar sesión, sincroniza la biblioteca local con Firestore.
  * Firestore tiene prioridad (source of truth en la nube).
+ *
+ * CORRECCIÓN v6:
+ *  Se rodea el bucle de restauración con beginSync() / endSync() para
+ *  que FirebaseSync ignore los eventos 'add'/'update' generados durante
+ *  la reconstrucción del store desde los datos de Firestore.
+ *  Sin esto, _syncFeed() intentaba borrar del feed entradas en estado
+ *  pending/playing/dropped que el usuario nunca modificó en esta sesión.
+ *
  * @param {string} uid
  */
 async function _syncLibraryOnLogin(uid) {
+  // Importación dinámica para evitar ciclo circular en el arrange de módulos.
+  // app-init.js importa auth-controller.js; auth-controller.js necesita
+  // FirebaseSync de app-init.js → importación lazy rompe el ciclo.
+  let FirebaseSync = null;
   try {
+    const appInit = await import('./app-init.js');
+    FirebaseSync  = appInit.FirebaseSync;
+  } catch {
+    // Si falla la importación (p.ej. tests) continuamos sin el flag.
+    console.warn('[AuthController] No se pudo importar FirebaseSync. La sync puede generar logs extras.');
+  }
+
+  try {
+    // ── Subir entradas locales antes de sobrescribir ──
     const localEntries = LibraryStore.getEntriesByStatus(null);
     if (localEntries.length > 0) {
       const uploaded = await FirebaseService.uploadLibraryBatch(localEntries);
       console.info(`[AuthController] ${uploaded} entradas locales subidas a Firestore para ${uid}.`);
     }
 
+    // ── Restaurar desde la nube ──────────────────────────────────────
     const cloudEntries = await FirebaseService.loadLibraryFromCloud();
     LibraryStore.clearAll();
+
+    // CORRECCIÓN v6: silenciar FirebaseSync durante la restauración
+    FirebaseSync?.beginSync();
 
     cloudEntries.forEach(entry => {
       if (!entry?.vnId || !entry?.status) return;
@@ -897,6 +826,10 @@ async function _syncLibraryOnLogin(uid) {
 
   } catch (err) {
     console.error('[AuthController] Error en sincronización:', err);
+  } finally {
+    // Siempre desactivar el flag, incluso si hubo error,
+    // para que FirebaseSync vuelva a operar normalmente.
+    FirebaseSync?.endSync();
   }
 }
 
@@ -910,7 +843,6 @@ async function _syncLibraryOnLogin(uid) {
  * @param {{uid,displayName,photoURL,email}|null} user
  */
 async function _onAuthChange(user) {
-  // Cerrar sheet si está abierto (el usuario acaba de iniciar sesión)
   if (_sheet?.classList.contains('is-open')) {
     _closeLoginSheet();
   }
