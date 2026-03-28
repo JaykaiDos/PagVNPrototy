@@ -3,28 +3,33 @@
 /**
  * @file js/ui-controller.js
  * @description Controlador principal de la UI de VN-Hub.
- *              Versión 5: integración del Módulo de Perfil de Usuario.
+ *              Versión 6: confirmación antes de perder datos de reseña.
  *
- * CAMBIOS v5:
+ * CAMBIOS v6:
+ *  - Import de confirmStatusChange desde modal-status-change.js.
+ *  - _applyStatusSelection() es ahora async: espera la confirmación del
+ *    usuario cuando el cambio implica borrar score/reseña/ruta favorita.
+ *    Si el usuario cancela, no se aplica ningún cambio ni se re-renderiza.
+ *
+ * CAMBIOS v5 (previos, mantenidos):
  *  - _cacheDOM() incluye viewProfile, navProfile, navProfileItem.
  *  - _switchView() soporta la vista 'profile' con guard de auth.
  *  - setFeedTabVisible() también controla la visibilidad de navProfileItem.
- *  - _bindEvents() registra el click de navProfile y el evento 'vnh:navigate'.
- *  - Al navegar a 'profile' se llama a ProfileController.openProfile().
  */
 
-import * as VndbService      from './vndb-service.js';
-import * as LibraryStore     from './library-store.js';
-import * as RenderEngine     from './render-engine.js';
-import * as ModalReview      from './modal-review.js';
-import * as ModalLog         from './modal-log.js';
-import * as ModalComment     from './modal-comment.js';
-import * as ModalDelete      from './modal-delete.js';
-import * as ProfileController from './profile-controller.js';
-import { ModalExport }       from './modal-export.js';
+import * as VndbService           from './vndb-service.js';
+import * as LibraryStore          from './library-store.js';
+import * as RenderEngine          from './render-engine.js';
+import * as ModalReview           from './modal-review.js';
+import * as ModalLog              from './modal-log.js';
+import * as ModalComment          from './modal-comment.js';
+import * as ModalDelete           from './modal-delete.js';
+import * as ProfileController     from './profile-controller.js';
+import { ModalExport }            from './modal-export.js';
+import { confirmStatusChange }    from './modal-status-change.js';
 import { VN_STATUS, VN_STATUS_META, TOAST_DURATION_MS } from './constants.js';
-import { ThemeManager }      from './app-init.js';
-import * as FirebaseService  from './firebase-service.js';
+import { ThemeManager }           from './app-init.js';
+import * as FirebaseService       from './firebase-service.js';
 
 
 // ─────────────────────────────────────────────
@@ -98,22 +103,16 @@ function _cacheDOM() {
 function _switchView(viewName) {
   if (viewName === _state.view) return;
 
-  // Guard de autenticación:
-  // - 'library' siempre requiere auth (datos privados del usuario).
-  // - 'profile' solo requiere auth cuando se navega desde el nav (perfil propio).
-  //   Los perfiles ajenos se cargan directamente desde profile-controller.init()
-  //   sin pasar por aquí, por lo que este guard nunca los bloquea.
   if (viewName === 'library' || viewName === 'profile') {
     const isAuthed = FirebaseService.isAuthenticated();
     if (!isAuthed) {
       _showToast('Inicia sesión para continuar.', 'info');
-      return; // No redirigir a search, simplemente no navegar
+      return;
     }
   }
 
   _state.view = viewName;
 
-  // Mostrar/ocultar vistas
   ['search', 'library', 'feed', 'profile'].forEach(v => {
     const el = document.getElementById(`view${_capitalize(v)}`);
     if (!el) return;
@@ -122,7 +121,6 @@ function _switchView(viewName) {
     el.classList.toggle('vh-view--hidden', !isActive);
   });
 
-  // Marcar nav activo
   ['navSearch', 'navLibrary', 'navFeed', 'navProfile'].forEach(id => {
     const btn = _dom[id];
     if (!btn) return;
@@ -139,11 +137,6 @@ function _capitalize(str) {
   return str.charAt(0).toUpperCase() + str.slice(1);
 }
 
-/**
- * Muestra u oculta los tabs de Comunidad y Perfil según el estado de auth.
- * Llamado desde auth-controller cuando cambia la sesión.
- * @param {boolean} isAuthenticated
- */
 function setFeedTabVisible(isAuthenticated) {
   if (_dom.navFeedItem)    _dom.navFeedItem.hidden    = !isAuthenticated;
   if (_dom.navProfileItem) _dom.navProfileItem.hidden = !isAuthenticated;
@@ -293,63 +286,32 @@ function _activateTab(tabStatus) {
   });
 }
 
-/**
- * Renderiza todos los paneles de la biblioteca e inyecta los botones
- * de exportación en cada sección de estado.
- *
- * CORRECCIÓN BUG-RENDER-01 — Peticiones paralelas duplicadas a VNDB:
- * ─────────────────────────────────────────────────────────────────
- *  CAUSA:
- *   _renderLibrary() llamaba a _renderPanel() 5 veces sin await.
- *   Cada llamada es async y todas comparten _state.vnCache.
- *   Al ejecutarse en paralelo, todas leían vnCache vacío ANTES de que
- *   cualquiera guardara resultados, generando 5 peticiones idénticas
- *   a VNDB con los mismos IDs al mismo tiempo.
- *   Si esas peticiones fallaban (CORS en localhost, red cortada, etc.),
- *   el fallback a getLocalMetaSnapshot() devolvía los mismos datos
- *   a todos los paneles, que los renderizaban multiplicados.
- *
- *  SOLUCIÓN — dos pasos:
- *   1. Pre-poblar vnCache ANTES de renderizar:
- *      Se recolectan todos los IDs únicos de todos los paneles,
- *      se hace UNA SOLA petición a VNDB, y se puebla el caché.
- *      Cuando los paneles renderizan, todos leen del caché ya lleno.
- *
- *   2. Los _renderPanel() pueden ejecutarse en paralelo sin riesgo
- *      porque ya no hacen peticiones de red — solo leen el caché.
- */
 async function _renderLibrary() {
   const stats = LibraryStore.getStats();
   RenderEngine.updateTabCounts(stats);
   RenderEngine.updateLibraryStats(stats);
 
-  // ── Paso 1: recolectar todos los IDs únicos sin caché ──────────
-  const allEntries    = LibraryStore.getEntriesByStatus(null);
-  const uncachedIds   = [...new Set(
+  const allEntries  = LibraryStore.getEntriesByStatus(null);
+  const uncachedIds = [...new Set(
     allEntries
       .map(e => e.vnId)
       .filter(id => !_state.vnCache.has(id))
   )];
 
-  // ── Paso 2: UNA SOLA petición para todos los IDs faltantes ─────
   if (uncachedIds.length > 0) {
     try {
       const vnList = await VndbService.getVnsByIds(uncachedIds);
       vnList.forEach(vn => _state.vnCache.set(vn.id, vn));
     } catch (err) {
       console.warn('[UI] No se pudieron cargar metadatos de biblioteca:', err);
-      // Fallback: usar snapshots locales si existen
       uncachedIds.forEach(id => {
-        if (_state.vnCache.has(id)) return; // ya en caché (parcial)
+        if (_state.vnCache.has(id)) return;
         const snap = VndbService.getLocalMetaSnapshot?.(id);
         if (snap) _state.vnCache.set(id, snap);
       });
     }
   }
 
-  // ── Paso 3: renderizar todos los paneles (el caché ya está listo) ──
-  // Se pueden ejecutar en paralelo con seguridad porque ya no hacen
-  // peticiones de red — solo leen _state.vnCache que está poblado.
   await Promise.all([
     _renderPanel('all',      LibraryStore.getEntriesByStatus(null)),
     _renderPanel('pending',  LibraryStore.getEntriesByStatus(VN_STATUS.PENDING)),
@@ -361,14 +323,6 @@ async function _renderLibrary() {
   _injectExportButtons(stats);
 }
 
-/**
- * Renderiza un panel específico de la biblioteca.
- * PRECONDICIÓN: _state.vnCache debe estar poblado antes de llamar
- * esta función. _renderLibrary() se encarga de eso en el Paso 2.
- *
- * @param {string}   panelId  - Identificador del panel ('all', 'pending', etc.)
- * @param {object[]} entries  - LibraryEntries para este panel
- */
 async function _renderPanel(panelId, entries) {
   const grid       = _dom.panelGrids[panelId];
   const emptyState = _dom.emptyStates[panelId];
@@ -383,24 +337,18 @@ async function _renderPanel(panelId, entries) {
 
   if (emptyState) emptyState.hidden = true;
 
-  // NOTA: ya no se hacen peticiones de red aquí.
-  // _renderLibrary() pre-pobló el caché en el Paso 2.
-  // Si algún ID no está en el caché (caso extremo: ID nuevo
-  // agregado entre el Paso 2 y el renderizado), se muestra
-  // con título de fallback para no romper el render.
-
   const fragment = document.createDocumentFragment();
 
   entries.forEach((libraryEntry, index) => {
     const vnEntry = _state.vnCache.get(libraryEntry.vnId) ?? {
-      id:          libraryEntry.vnId,
-      title:       libraryEntry.vnId,
-      imageUrl:    '',
+      id:           libraryEntry.vnId,
+      title:        libraryEntry.vnId,
+      imageUrl:     '',
       imageIsAdult: false,
-      rating:      'N/A',
-      released:    '',
-      tags:        [],
-      developers:  [],
+      rating:       'N/A',
+      released:     '',
+      tags:         [],
+      developers:   [],
     };
     fragment.appendChild(RenderEngine.createLibraryCard(vnEntry, libraryEntry, index));
   });
@@ -410,14 +358,9 @@ async function _renderPanel(panelId, entries) {
 
 
 // ─────────────────────────────────────────────
-// 5b. SISTEMA DE EXPORTACIÓN PNG (v4)
+// 5b. SISTEMA DE EXPORTACIÓN PNG
 // ─────────────────────────────────────────────
 
-/**
- * Inyecta el botón "Exportar como imagen" en cada tabpanel de estado
- * que tenga al menos una VN.
- * @param {{ total: number, byStatus: Record<string, number> }} stats
- */
 function _injectExportButtons(stats) {
   const EXPORT_STATUSES = [
     VN_STATUS.PENDING,
@@ -467,11 +410,6 @@ function _injectExportButtons(stats) {
   });
 }
 
-/**
- * Construye el <button> de exportación para una sección de estado.
- * @param {string} status
- * @returns {HTMLButtonElement}
- */
 function _buildExportButton(status) {
   const meta = VN_STATUS_META[status];
 
@@ -497,10 +435,6 @@ function _buildExportButton(status) {
   return btn;
 }
 
-/**
- * Handler centralizado para todos los botones de exportación.
- * @param {MouseEvent} e
- */
 function _onExportButtonClick(e) {
   const btn    = e.currentTarget;
   const status = btn.dataset.exportStatus;
@@ -513,10 +447,6 @@ function _onExportButtonClick(e) {
   _openExportModal(status);
 }
 
-/**
- * Recopila datos y abre el modal de exportación.
- * @param {string} status
- */
 function _openExportModal(status) {
   const entries = LibraryStore.getEntriesByStatus(status);
 
@@ -552,9 +482,16 @@ function _closeStatusMenu() {
 
 /**
  * Aplica el estado seleccionado en el menú flotante.
- * @param {string} status
+ *
+ * CAMBIO v6 — async + confirmación:
+ *  Antes de aplicar cualquier cambio que implique borrar datos de una
+ *  entrada FINISHED (score, reseña, ruta favorita), se pide confirmación
+ *  al usuario vía modal-status-change.
+ *  Si el usuario cancela → la función retorna sin modificar nada.
+ *
+ * @param {string} status - Estado destino seleccionado por el usuario.
  */
-function _applyStatusSelection(status) {
+async function _applyStatusSelection(status) {
   const vnId = _state.menuTargetVnId;
   if (!vnId) return;
 
@@ -565,6 +502,12 @@ function _applyStatusSelection(status) {
   const vnEntry       = _state.vnCache.get(vnId);
   const vnTitle       = vnEntry?.title ?? vnId;
   const vnImageUrl    = vnEntry?.imageUrl ?? '';
+
+  // ── NUEVO: pedir confirmación si hay datos que perder ─────────
+  // confirmStatusChange() devuelve true inmediatamente si no hay riesgo.
+  const confirmed = await confirmStatusChange(existingEntry, status, vnTitle);
+  if (!confirmed) return;
+  // ──────────────────────────────────────────────────────────────
 
   if (!existingEntry) {
     LibraryStore.addVn(vnId, status);
@@ -766,6 +709,7 @@ function _openStatusModal(vnId) {
       s.textContent = label;
       btn.appendChild(i);
       btn.appendChild(s);
+      // CAMBIO v6: el handler es async → usar wrapper para no perder el event
       btn.addEventListener('click', () => _applyStatusSelection(status));
       li.appendChild(btn);
       list.appendChild(li);
@@ -917,34 +861,27 @@ function _executeRemove(vnId) {
 
 function _bindEvents() {
 
-  // Toggle tema
   _dom.themeToggle?.addEventListener('click', () => ThemeManager.toggle());
 
-  // Navegación principal (incluye navProfile)
   ['navSearch', 'navLibrary', 'navFeed', 'navProfile'].forEach(id => {
     _dom[id]?.addEventListener('click', (e) => {
       _switchView(e.currentTarget.dataset.view);
     });
   });
 
-  // Evento personalizado 'vnh:navigate' — disparado por profile-controller
-  // y auth-controller para navegar programáticamente a una vista.
   document.addEventListener('vnh:navigate', (e) => {
     const { view, uid } = e.detail ?? {};
     if (!view) return;
 
     if (view === 'profile') {
-      // Forzar actualización de vista sin guard de auth
       _state.view = '';
       _switchView('profile');
-      // Si hay uid específico (perfil ajeno), abrirlo directamente
       if (uid) ProfileController.openProfile(uid);
     } else {
       _switchView(view);
     }
   });
 
-  // Buscador
   _dom.searchInput?.addEventListener('input', _onSearchInput);
   _dom.searchInput?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
@@ -957,7 +894,6 @@ function _bindEvents() {
     }
   });
 
-  // Limpiar búsqueda
   _dom.searchClear?.addEventListener('click', () => {
     if (_dom.searchInput) _dom.searchInput.value = '';
     _dom.searchClear.hidden = true;
@@ -965,7 +901,6 @@ function _bindEvents() {
     _clearSearchResults();
   });
 
-  // Paginación
   _dom.prevPage?.addEventListener('click', () => {
     if (_state.searchPage > 1) _executeSearch(_state.searchQuery, _state.searchPage - 1);
   });
@@ -973,7 +908,6 @@ function _bindEvents() {
     if (_state.searchHasMore) _executeSearch(_state.searchQuery, _state.searchPage + 1);
   });
 
-  // Pestañas de biblioteca
   document.querySelector('.vh-tabs')?.addEventListener('click', (e) => {
     const btn = e.target.closest('[role="tab"]');
     if (btn) _activateTab(btn.dataset.status);
@@ -992,13 +926,9 @@ function _bindEvents() {
     e.preventDefault();
   });
 
-  // Grid de búsqueda
   _dom.searchResults?.addEventListener('click', _handleGridClick);
-
-  // Paneles de biblioteca
   document.getElementById('viewLibrary')?.addEventListener('click', _handleLibraryClick);
 
-  // Menú flotante
   _dom.statusMenu?.addEventListener('click', (e) => {
     const btn = e.target.closest('[role="menuitem"][data-status]');
     if (btn) _applyStatusSelection(btn.dataset.status);
@@ -1010,7 +940,6 @@ function _bindEvents() {
 
   _dom.menuOverlay?.addEventListener('click', _closeStatusMenu);
 
-  // Botón "ir a búsqueda" desde estados vacíos
   document.addEventListener('click', (e) => {
     if (e.target.closest('[data-go-search]')) {
       _switchView('search');

@@ -1,0 +1,179 @@
+/* ════════════════════════════════════════════════════════════════
+   MODAL DE CONFIRMACIÓN DE CAMBIO DE ESTADO
+   Archivo: vn-hub-components.css — agregar al final del archivo
+
+   Usado por: js/modal-status-change.js
+   Se activa cuando el usuario intenta cambiar el estado de una VN
+   que está en FINISHED y tiene score/reseña/ruta favorita guardados.
+════════════════════════════════════════════════════════════════ */
+
+/* ── Overlay con z-index sobre otros modales ── */
+.vhsc-overlay {
+  z-index: 600;
+}
+
+/* ── Modal contenedor ── */
+.vhsc-modal {
+  max-width: 460px;
+}
+
+/* ── Ícono de advertencia en el header ── */
+.vhsc-icon-wrap {
+  flex-shrink: 0;
+  width:           44px;
+  height:          44px;
+  border-radius:   var(--vh-radius-md);
+  background:      rgba(234, 179, 8, 0.12);
+  border:          1.5px solid rgba(234, 179, 8, 0.30);
+  display:         flex;
+  align-items:     center;
+  justify-content: center;
+  font-size:       1.3rem;
+}
+
+[data-theme="dark"] .vhsc-icon-wrap {
+  background: rgba(251, 191, 36, 0.12);
+  border-color: rgba(251, 191, 36, 0.28);
+}
+
+/* ── Subtítulo con el nombre de la VN ── */
+.vhsc-subtitle {
+  font-style: italic;
+  color: var(--vh-text-secondary);
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Tarjeta de datos que se perderán ── */
+.vhsc-data-card {
+  background:    rgba(234, 179, 8, 0.06);
+  border:        1.5px solid rgba(234, 179, 8, 0.22);
+  border-radius: var(--vh-radius-md);
+  padding:       0.9rem 1rem;
+}
+
+[data-theme="dark"] .vhsc-data-card {
+  background:   rgba(251, 191, 36, 0.07);
+  border-color: rgba(251, 191, 36, 0.20);
+}
+
+.vhsc-data-title {
+  font-size:     0.75rem;
+  font-weight:   700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color:         #b45309;
+  margin-bottom: 0.6rem;
+}
+
+[data-theme="dark"] .vhsc-data-title { color: #fbbf24; }
+
+.vhsc-data-list {
+  list-style: none;
+  display:    flex;
+  flex-direction: column;
+  gap:        0.4rem;
+}
+
+.vhsc-data-item {
+  font-size:   0.85rem;
+  color:       var(--vh-text-secondary);
+  line-height: 1.45;
+  padding-left: 0.25rem;
+  border-left:  2px solid rgba(234, 179, 8, 0.35);
+  padding-left: 0.6rem;
+
+  /* Truncar en 2 líneas si el texto es muy largo */
+  display:              -webkit-box;
+  -webkit-line-clamp:   2;
+  line-clamp:           2;
+  -webkit-box-orient:   vertical;
+  overflow:             hidden;
+}
+
+/* ── Fila del estado destino ── */
+.vhsc-dest-row {
+  display:     flex;
+  align-items: center;
+  gap:         0.75rem;
+  margin-top:  0.25rem;
+  padding:     0.6rem 0.85rem;
+  background:  var(--vh-bg-elevated);
+  border:      1px solid var(--vh-border);
+  border-radius: var(--vh-radius-md);
+}
+
+.vhsc-dest-label {
+  font-size:  0.78rem;
+  font-weight: 600;
+  color:      var(--vh-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
+/* El badge de destino reutiliza las clases .vh-badge existentes */
+.vhsc-dest-badge {
+  font-size: 0.82rem;
+}
+
+/* ── Botón confirmar — variante warning (amarillo/ámbar) ── */
+.vhsc-confirm-btn--warning {
+  background:   #d97706;
+  color:        #ffffff;
+  border-color: #d97706;
+  box-shadow:   0 4px 14px rgba(217, 119, 6, 0.35);
+}
+
+.vhsc-confirm-btn--warning:hover {
+  background:   #b45309;
+  border-color: #b45309;
+  transform:    translateY(-2px);
+  box-shadow:   0 6px 20px rgba(180, 83, 9, 0.48);
+}
+
+[data-theme="dark"] .vhsc-confirm-btn--warning {
+  background:   #f59e0b;
+  border-color: #f59e0b;
+  color:        #0a0608;
+  box-shadow:   0 4px 16px rgba(245, 158, 11, 0.40);
+}
+
+[data-theme="dark"] .vhsc-confirm-btn--warning:hover {
+  background:   #d97706;
+  border-color: #d97706;
+  box-shadow:   0 6px 24px rgba(217, 119, 6, 0.55);
+}
+
+/* El botón danger ya existe en vn-hub.css (.vh-btn--danger) */
+
+/* ── Accesibilidad ── */
+.vhsc-confirm-btn--warning:focus-visible {
+  outline:        2px solid #d97706;
+  outline-offset: 2px;
+}
+
+/* ── Responsive ── */
+@media (max-width: 480px) {
+  .vhsc-modal {
+    max-width: 100%;
+  }
+
+  .vhsc-subtitle {
+    max-width: 200px;
+  }
+
+  .vhsc-dest-row {
+    flex-direction: column;
+    align-items:    flex-start;
+    gap:            0.4rem;
+  }
+}
+
+/* ── Reducir movimiento ── */
+@media (prefers-reduced-motion: reduce) {
+  .vhsc-confirm-btn--warning,
+  .vhsc-icon-wrap { transition: none; }
+}

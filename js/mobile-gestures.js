@@ -2,33 +2,43 @@
  * @file js/mobile-gestures.js
  * @description Sistema de gestos táctiles para VN-Hub.
  *
- * CAMBIOS v2 — Optimización de carga de imágenes:
+ * REESCRITURA v3 — Corrección definitiva de carga de imágenes:
  * ─────────────────────────────────────────────────────────────────
- *  LazyImageManager — 3 mejoras:
+ *  LazyImageManager — Problemas encontrados y corregidos:
  *
- *  1. rootMargin: '100px 0px' → '400px 0px'
- *     El observer anterior iniciaba la carga cuando la imagen estaba
- *     a solo 100px del viewport. Con cards de ~200px y grids de 4-6
- *     filas, el usuario llegaba a la imagen antes de que terminara de
- *     cargar. Con 400px de margen, las imágenes se precargan ~2 filas
- *     antes de ser visibles → aparecen instantáneamente al hacer scroll.
+ *  BUG-01: El evento 'vnh:cards:rendered' nunca se disparaba desde
+ *    render-engine.js ni ui-controller.js, por lo que observeAll()
+ *    post-render jamás se ejecutaba. Las imágenes quedaban en negro
+ *    porque el observer se inicializaba ANTES de que existieran en el DOM.
+ *    FIX: MutationObserver sobre los grids de cards para detectar
+ *    automáticamente cuando se insertan nuevas imágenes, sin depender
+ *    de eventos externos que nadie emitía.
  *
- *  2. Fade-in CSS correctamente aplicado.
- *     La clase 'js-lazy-active' activa opacity:0 en las imágenes lazy,
- *     y '.is-loaded' las hace visibles con transición. La transición
- *     ahora es más rápida (0.25s vs implícita) para no retrasar la
- *     percepción de carga.
+ *  BUG-02: Conflicto entre loading="lazy" nativo y el IntersectionObserver
+ *    manual. El navegador posponía la carga (lazy nativo), el observer
+ *    la esperaba (lazy manual), y el resultado era que ninguno avanzaba
+ *    en ciertos estados de scroll/viewport.
+ *    FIX: Las imágenes en el viewport o cercanas se fuerzan a loading="eager"
+ *    en el momento de observación. Las lejanas mantienen lazy nativo como
+ *    fallback de segundo nivel.
  *
- *  3. observeAll() ahora usa un selector más específico para evitar
- *     observar imágenes que ya tienen la clase is-loaded (re-renders).
+ *  BUG-03: Sin timeout. Una imagen que tardaba en responder bloqueaba
+ *    su slot indefinidamente, mostrando fondo negro sin fallback.
+ *    FIX: Timeout de 8 segundos por imagen. Si vence, se muestra el
+ *    placeholder de emoji sin esperar más.
  *
- * MÓDULOS EXPORTADOS (sin cambios):
+ *  BUG-04: observeAll() con selector muy específico que excluía imágenes
+ *    recién insertadas si aún no tenían la clase correcta.
+ *    FIX: Selector simplificado + MutationObserver que cubre todos los casos.
+ *
+ * MÓDULOS EXPORTADOS:
  *  - SwipeNavigator   — swipe horizontal para cambiar entre vistas
  *  - PullToRefresh    — pull-to-refresh para recargar la vista activa
  *  - MobileNavManager — hamburger menu + bottom bar sync
- *  - LazyImageManager — fade-in y precarga de portadas
+ *  - LazyImageManager — carga progresiva de portadas con fallbacks robustos
  *
  * @module mobile-gestures
+ * @version 3.0
  */
 
 'use strict';
@@ -542,14 +552,28 @@ const MobileNavManager = (() => {
 
 
 // ─────────────────────────────────────────────────────────────
-// 4. LAZY IMAGE MANAGER
+// 4. LAZY IMAGE MANAGER — v3 REESCRITURA COMPLETA
 //
-// MEJORAS v2:
-//  - rootMargin aumentado de 100px → 400px para precargar
-//    imágenes antes de que el usuario llegue a ellas.
-//  - Transición de fade-in explícita y más rápida (0.25s).
-//  - observeAll() excluye imágenes ya cargadas (.is-loaded)
-//    para evitar re-observar en re-renders del mismo grid.
+// ARQUITECTURA:
+//  El problema central era que el sistema dependía de un evento
+//  'vnh:cards:rendered' que NUNCA se emitía desde el código que
+//  renderiza las cards. Esto causaba que las imágenes insertadas
+//  después del init() no fueran observadas nunca.
+//
+//  SOLUCIÓN: MutationObserver sobre el documento completo para
+//  detectar la inserción de nuevas imágenes de forma automática,
+//  independientemente de qué módulo las inserte y sin requerir
+//  ningún evento personalizado.
+//
+// FLUJO CORREGIDO:
+//  1. init() → activa body.js-lazy-active + IntersectionObserver
+//  2. MutationObserver detecta nuevos <img class="vh-card__cover">
+//  3. Para cada imagen nueva → _processImage()
+//     a. Si está en viewport → forzar eager + marcar loaded
+//     b. Si está cerca (rootMargin 600px) → IntersectionObserver
+//     c. Al intersectar → remover lazy nativo + disparar carga real
+//  4. Timeout de 8s por imagen → fallback a placeholder si falla
+//
 // ─────────────────────────────────────────────────────────────
 
 const LazyImageManager = (() => {
@@ -557,103 +581,294 @@ const LazyImageManager = (() => {
   /** @type {IntersectionObserver|null} */
   let _observer = null;
 
+  /** @type {MutationObserver|null} - Detecta nuevas imágenes en el DOM */
+  let _mutationObserver = null;
+
   /**
-   * Reemplaza una imagen que falló por un placeholder div controlado.
-   * Segunda línea de defensa tras el onerror de render-engine.
-   * @param {HTMLImageElement} img
+   * Timeout por imagen en ms.
+   * Si la imagen no carga en este tiempo, se muestra el placeholder.
+   * 8 segundos es generoso pero evita esperas infinitas.
    */
-  function _handleImageError(img) {
-    if (!img.parentNode) return;
+  const IMAGE_LOAD_TIMEOUT_MS = 8_000;
+
+  /**
+   * Selector de imágenes de portada que deben cargarse progresivamente.
+   * Importante: NO incluir .is-loaded para evitar re-procesar.
+   */
+  const IMG_SELECTOR = '.vh-card__cover[src]:not(.is-loaded):not([data-vnh-processing])';
+
+  // ── HELPERS ──────────────────────────────────────────────────
+
+  /**
+   * Reemplaza una imagen que falló o tardó demasiado por un placeholder.
+   * Opera tanto en el caso de error como de timeout.
+   *
+   * @param {HTMLImageElement} img
+   * @param {'error'|'timeout'} reason
+   */
+  function _applyPlaceholder(img, reason = 'error') {
+    if (!img.parentNode || img.dataset.vhnFailed) return;
+    img.dataset.vhnFailed = '1';
 
     const placeholder = document.createElement('div');
-    placeholder.className   = `${img.className} vh-card__cover-placeholder vh-card__cover-placeholder--error`;
+    placeholder.className   = `${img.className.replace(/is-loaded/g, '')} vh-card__cover-placeholder vh-card__cover-placeholder--error`;
     placeholder.textContent = '📖';
     placeholder.setAttribute('role', 'img');
-    placeholder.setAttribute('aria-label', 'Imagen no disponible');
+    placeholder.setAttribute('aria-label', `Imagen no disponible${reason === 'timeout' ? ' (timeout)' : ''}`);
 
     img.parentNode.replaceChild(placeholder, img);
+
+    if (reason === 'timeout') {
+      console.debug('[LazyImageManager] Timeout de imagen, mostrando placeholder.');
+    }
+  }
+
+  /**
+   * Marca una imagen como cargada correctamente.
+   * Añade la clase is-loaded que activa el fade-in CSS.
+   *
+   * @param {HTMLImageElement} img
+   */
+  function _markLoaded(img) {
+    if (!img.parentNode || img.dataset.vhnFailed) return;
+    img.classList.add('is-loaded');
+  }
+
+  /**
+   * Adjunta los event listeners de carga a una imagen,
+   * incluyendo un timeout de seguridad.
+   *
+   * FLUJO:
+   *  - Si ya cargó (caché del navegador) → marcar inmediatamente.
+   *  - Si falló → placeholder inmediato.
+   *  - Si está cargando → esperar load/error + timeout.
+   *
+   * @param {HTMLImageElement} img
+   */
+  function _attachLoadHandlers(img) {
+    // Marcar como en procesamiento para no duplicar handlers
+    img.dataset.vhnProcessing = '1';
+
+    // Caso 1: ya está en caché del navegador → completo inmediatamente
+    if (img.complete) {
+      if (img.naturalWidth > 0) {
+        _markLoaded(img);
+      } else {
+        _applyPlaceholder(img, 'error');
+      }
+      return;
+    }
+
+    // Caso 2: aún cargando → instalar handlers + timeout
+    let settled = false;
+
+    const settle = (success) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+
+      if (success) {
+        _markLoaded(img);
+      } else {
+        _applyPlaceholder(img, 'error');
+      }
+    };
+
+    // Timeout de seguridad: si la imagen no responde, mostrar placeholder
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        _applyPlaceholder(img, 'timeout');
+      }
+    }, IMAGE_LOAD_TIMEOUT_MS);
+
+    img.addEventListener('load',  () => settle(true),  { once: true });
+    img.addEventListener('error', () => settle(false), { once: true });
+  }
+
+  /**
+   * Procesa una imagen recién detectada.
+   *
+   * DECISIÓN DE ESTRATEGIA:
+   *  - Si el IntersectionObserver está disponible → delegar observación.
+   *  - Si no → carga inmediata (progressive enhancement).
+   *
+   * @param {HTMLImageElement} img
+   */
+  function _processImage(img) {
+    // Saltar si ya fue procesada, no tiene src, o es un placeholder
+    if (
+      img.dataset.vhnProcessing ||
+      img.dataset.vhnFailed      ||
+      img.classList.contains('is-loaded') ||
+      !img.getAttribute('src')
+    ) return;
+
+    // Sin IntersectionObserver: cargar directamente
+    if (!_observer) {
+      _attachLoadHandlers(img);
+      return;
+    }
+
+    // Con IntersectionObserver: registrar para observación lazy
+    // La marca de procesamiento se añade dentro de _attachLoadHandlers
+    // al intersectar; aquí solo marcamos que el observer la tiene.
+    img.dataset.vhnProcessing = 'pending';
+    _observer.observe(img);
   }
 
   /**
    * Callback del IntersectionObserver.
+   * Cuando una imagen entra en el área de observación, se activa su carga.
+   *
+   * CORRECCIÓN BUG-02:
+   *  Al intersectar, forzamos loading="eager" para cancelar el defer
+   *  nativo del navegador. Sin esto, el navegador podía ignorar la imagen
+   *  a pesar de estar en el viewport porque ya la había deferido con lazy.
+   *
    * @param {IntersectionObserverEntry[]} entries
    */
   function _onIntersect(entries) {
     entries.forEach(entry => {
       if (!entry.isIntersecting) return;
 
-      const img = entry.target;
+      const img = /** @type {HTMLImageElement} */ (entry.target);
       _observer?.unobserve(img);
 
-      // Ya cargó (caché del navegador) → activar inmediatamente
-      if (img.complete && img.naturalWidth > 0) {
-        img.classList.add('is-loaded');
-        return;
-      }
+      // Forzar eager loading para cancelar el defer nativo
+      // Esto es seguro porque ya sabemos que la imagen está cerca del viewport
+      img.setAttribute('loading', 'eager');
 
-      // Ya falló → placeholder
-      if (img.complete && img.naturalWidth === 0) {
-        _handleImageError(img);
-        return;
-      }
-
-      // Aún cargando → esperar eventos
-      img.addEventListener('load', () => {
-        img.classList.add('is-loaded');
-      }, { once: true });
-
-      img.addEventListener('error', () => {
-        _handleImageError(img);
-      }, { once: true });
+      // Adjuntar handlers de carga
+      _attachLoadHandlers(img);
     });
   }
 
+  /**
+   * Escanea el DOM completo en busca de imágenes sin procesar.
+   * Se llama después de cada renderizado masivo.
+   */
+  function _scanAll() {
+    const imgs = document.querySelectorAll(IMG_SELECTOR);
+    imgs.forEach(_processImage);
+  }
+
+  /**
+   * Configura el MutationObserver que detecta nuevas imágenes
+   * insertadas en el DOM por cualquier módulo (render-engine,
+   * explore-controller, etc.) sin requerir eventos personalizados.
+   *
+   * CORRECCIÓN BUG-01:
+   *  Antes se dependía de 'vnh:cards:rendered', que nunca se emitía.
+   *  Ahora el MutationObserver detecta cualquier inserción de nodo
+   *  que contenga imágenes de portada.
+   */
+  function _startMutationObserver() {
+    if (!window.MutationObserver) return;
+
+    // Debounce para evitar múltiples _scanAll() en ráfagas de inserción
+    let scanTimer = null;
+    const debouncedScan = () => {
+      clearTimeout(scanTimer);
+      scanTimer = setTimeout(_scanAll, 50);
+    };
+
+    _mutationObserver = new MutationObserver((mutations) => {
+      let hasNewImages = false;
+
+      for (const mutation of mutations) {
+        if (mutation.type !== 'childList') continue;
+
+        for (const node of mutation.addedNodes) {
+          if (node.nodeType !== Node.ELEMENT_NODE) continue;
+
+          // Verificar si el nodo añadido ES una imagen de portada
+          // o CONTIENE imágenes de portada
+          if (
+            (node.matches && node.matches('.vh-card__cover')) ||
+            (node.querySelector && node.querySelector('.vh-card__cover'))
+          ) {
+            hasNewImages = true;
+            break;
+          }
+        }
+        if (hasNewImages) break;
+      }
+
+      if (hasNewImages) {
+        debouncedScan();
+      }
+    });
+
+    // Observar todo el body: cualquier inserción de cards en cualquier grid
+    _mutationObserver.observe(document.body, {
+      childList: true,
+      subtree:   true,
+    });
+  }
+
+  // ── API PÚBLICA ──────────────────────────────────────────────
+
   return {
+
     /**
-     * Inicializa el IntersectionObserver.
+     * Inicializa el sistema de carga progresiva.
      *
-     * rootMargin: '400px 0px'
-     *  Las imágenes se empiezan a cargar cuando están a 400px del
-     *  viewport (aprox. 2 filas de cards antes de ser visibles).
-     *  Con el SW en Cache-First, la segunda carga es desde disco
-     *  local, por lo que 400px es suficiente incluso en scroll rápido.
-     *
-     * PROGRESSIVE ENHANCEMENT:
-     *  Si IntersectionObserver no está disponible, las imágenes son
-     *  visibles de inmediato con comportamiento nativo del navegador.
+     * CAMBIOS v3:
+     *  1. rootMargin ampliado a 600px para precargar más agresivamente.
+     *  2. MutationObserver sustituye al evento 'vnh:cards:rendered'.
+     *  3. _scanAll() inicial cubre imágenes ya presentes al init.
+     *  4. Timeout de 8s por imagen para evitar esperas indefinidas.
      */
     init() {
-      if (!window.IntersectionObserver) return;
+      if (!window.IntersectionObserver) {
+        // Sin IO: marcar y cargar todo directamente
+        document.body.classList.add('js-lazy-active');
+        _scanAll();
+        return;
+      }
 
       document.body.classList.add('js-lazy-active');
 
       _observer = new IntersectionObserver(_onIntersect, {
-        rootMargin: '400px 0px', // ← era 100px, aumentado a 400px
-        threshold:  0.01,
+        // 600px de margen: ~3 filas de cards se precargan antes de ser visibles.
+        // Mayor margen = menos negro = mejor UX especialmente en conexiones lentas.
+        rootMargin: '600px 0px',
+        threshold:  0,
       });
 
-      this.observeAll();
+      // Escanear imágenes que ya están en el DOM al inicializar
+      _scanAll();
+
+      // Activar el MutationObserver para detectar inserción de nuevas cards
+      _startMutationObserver();
+
+      // Mantener compatibilidad: también escuchar el evento si alguien lo emite
+      document.addEventListener('vnh:cards:rendered', _scanAll);
+
+      console.info('[LazyImageManager] Inicializado v3 con MutationObserver ✓');
     },
 
     /**
-     * Observa las imágenes lazy del grid que aún no han cargado.
-     * Se llama tras cada render de nuevas cards.
-     *
-     * MEJORA: el selector excluye imágenes ya cargadas (.is-loaded)
-     * y las que fallaron (.vh-card__cover-placeholder--error) para
-     * no desperdiciar entradas del observer en elementos ya resueltos.
+     * Fuerza un escaneo manual del DOM.
+     * Útil para ser llamado desde código externo si es necesario.
+     * Preservado por compatibilidad hacia atrás con app-init.js.
      */
     observeAll() {
-      if (!_observer) return;
-      const imgs = document.querySelectorAll(
-        '.vh-card__cover[loading="lazy"]:not(.is-loaded):not(.vh-card__cover-placeholder--error)'
-      );
-      imgs.forEach(img => _observer.observe(img));
+      _scanAll();
     },
 
+    /**
+     * Limpia todos los recursos del manager.
+     */
     destroy() {
       _observer?.disconnect();
       _observer = null;
+
+      _mutationObserver?.disconnect();
+      _mutationObserver = null;
+
+      document.removeEventListener('vnh:cards:rendered', _scanAll);
       document.body.classList.remove('js-lazy-active');
     },
   };

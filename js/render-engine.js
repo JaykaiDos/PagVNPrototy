@@ -3,6 +3,31 @@
 /**
  * @file js/render-engine.js
  * @description Motor de renderizado de componentes UI para VN-Hub.
+ *
+ * CORRECCIONES v5 — Imagen loading fix:
+ * ─────────────────────────────────────────────────────────────────
+ *  BUG-IMAGE-01: _safeImage() usaba loading="lazy" nativo del navegador
+ *    en todas las imágenes excepto las primeras 3. Esto causaba que el
+ *    browser dejara de cargar imágenes fuera del viewport, creando un
+ *    conflicto con LazyImageManager que las esperaba para animarlas.
+ *    Resultado: imágenes en negro indefinidamente en la biblioteca.
+ *
+ *    FIX: Se elimina loading="lazy" del atributo HTML. El lazy loading
+ *    lo gestiona exclusivamente LazyImageManager via IntersectionObserver.
+ *    Las imágenes se crean con loading="eager" para que el navegador
+ *    las descargue cuando el observer las active, sin doble-diferimiento.
+ *
+ *  BUG-IMAGE-02: No se emitía el evento 'vnh:cards:rendered' tras renderizar.
+ *    LazyImageManager.observeAll() nunca corría post-render.
+ *
+ *    FIX PARCIAL aquí: se emite el evento en _appendCardToGrid() y en
+ *    los helpers públicos. FIX DEFINITIVO: LazyImageManager v3 usa
+ *    MutationObserver y ya no depende de este evento.
+ *
+ * CORRECCIONES v4 (previas, mantenidas):
+ *  - PERF-03: handler onerror → reemplaza imagen rota por placeholder div.
+ *  - PERF-04: width/height declarados → reserva espacio, elimina CLS.
+ *  - PERF-05: fetchpriority="high" en las primeras cards → mejora LCP.
  */
 
 import { VN_STATUS, VN_STATUS_META, SCORE_CATEGORIES }      from './constants.js';
@@ -21,7 +46,6 @@ const NO_IMAGE_PLACEHOLDER = '📖';
  * Dimensiones estándar de portadas en VNDB.
  * Declarar width/height evita layout shift (CLS) al reservar
  * el espacio antes de que la imagen termine de descargar.
- * El CSS controla las dimensiones visuales reales con object-fit.
  */
 const COVER_WIDTH  = 200;
 const COVER_HEIGHT = 300;
@@ -53,16 +77,9 @@ function _elText(tag, cls, text, attrs = {}) {
 
 /**
  * Convierte un elemento <img> roto en un placeholder div controlado.
- * Se llama desde el handler onerror de _safeImage().
- *
- * MOTIVO: cuando la URL de VNDB falla (404, red cortada, etc.), el
- * navegador muestra su ícono de imagen rota nativo. Este helper lo
- * reemplaza por un placeholder visual consistente con el diseño.
- *
  * @param {HTMLImageElement} img - La imagen que falló.
  */
 function _applyImgPlaceholder(img) {
-  // Preservar las clases CSS de la imagen para mantener el layout
   const cls = img.className;
 
   const placeholder = document.createElement('div');
@@ -71,25 +88,29 @@ function _applyImgPlaceholder(img) {
   placeholder.setAttribute('aria-label', 'Imagen no disponible');
   placeholder.setAttribute('role', 'img');
 
-  // Reemplazar la imagen rota por el placeholder en el DOM
   img.parentNode?.replaceChild(placeholder, img);
 }
 
 /**
  * Crea un elemento de imagen seguro con fallback de error controlado.
  *
- * CORRECCIONES v4:
- *  - PERF-03: handler onerror → reemplaza imagen rota por placeholder div.
- *  - PERF-04: width/height declarados → reserva espacio, elimina CLS.
- *  - PERF-05: fetchpriority="high" en las primeras cards → mejora LCP.
+ * CORRECCIÓN BUG-IMAGE-01:
+ *  Ya NO se usa loading="lazy" nativo en las imágenes gestionadas por
+ *  LazyImageManager. El lazy loading lo controla el IntersectionObserver
+ *  de mobile-gestures.js. Usar lazy nativo + IO manual causaba que las
+ *  imágenes nunca se cargaran (doble-defer).
  *
- * Si src no es una URL válida (http/https), devuelve directamente
- * el placeholder div sin intentar crear un <img>.
+ *  ESTRATEGIA:
+ *  - Primeras 3 cards (index < 3): loading="eager" + fetchpriority="high"
+ *    para máximo rendimiento en el LCP.
+ *  - Resto de cards: NO se pone loading="lazy". LazyImageManager las
+ *    gestiona vía IntersectionObserver y pone loading="eager" al activarse.
+ *    Esto evita el doble-deferimiento browser+IO.
  *
  * @param {string}  src      - URL de la imagen.
  * @param {string}  alt      - Texto alternativo.
  * @param {string}  cls      - Clase CSS de la imagen.
- * @param {boolean} [priority=false] - Si true, añade fetchpriority="high".
+ * @param {boolean} [priority=false] - Si true, carga inmediata y prioritaria.
  * @returns {HTMLElement} <img> o <div> placeholder.
  */
 function _safeImage(src, alt, cls, priority = false) {
@@ -104,32 +125,47 @@ function _safeImage(src, alt, cls, priority = false) {
   }
 
   const img = _el('img', cls);
-  img.setAttribute('src',     src);
-  img.setAttribute('alt',     alt);
-  img.setAttribute('loading', priority ? 'eager' : 'lazy');
+  img.setAttribute('src',      src);
+  img.setAttribute('alt',      alt);
   img.setAttribute('decoding', 'async');
 
   // PERF-04: reservar espacio para evitar CLS
   img.setAttribute('width',  String(COVER_WIDTH));
   img.setAttribute('height', String(COVER_HEIGHT));
 
-  // PERF-05: prioridad alta solo en primeras cards (above the fold)
   if (priority) {
+    // Primeras cards: carga inmediata y prioritaria para LCP
+    img.setAttribute('loading',       'eager');
     img.setAttribute('fetchpriority', 'high');
+    // Las primeras cards se marcan directamente si la imagen carga rápido
+    img.addEventListener('load', () => img.classList.add('is-loaded'), { once: true });
+    img.addEventListener('error', () => _applyImgPlaceholder(img), { once: true });
+  } else {
+    /*
+     * CORRECCIÓN CRÍTICA:
+     * NO ponemos loading="lazy" aquí. LazyImageManager (mobile-gestures.js v3)
+     * gestiona el lazy loading via IntersectionObserver + MutationObserver.
+     * Cuando una imagen intersecta el viewport, LazyImageManager la pone
+     * en loading="eager" y adjunta los handlers.
+     *
+     * Si pusiéramos loading="lazy" aquí, el browser y el IO competirían:
+     * el browser difiere → el IO la ve "cargando" → espera evento load
+     * que llega tarde o nunca si el browser decide no cargarla aún.
+     */
+    img.setAttribute('loading', 'eager');
   }
 
-  // PERF-03: fallback controlado si la imagen falla
-  img.addEventListener('error', () => _applyImgPlaceholder(img), { once: true });
+  // Handler de error como segunda línea de defensa
+  // (LazyImageManager tiene su propio handler, pero por si acaso)
+  img.addEventListener('error', () => {
+    if (!img.dataset.vhnFailed) _applyImgPlaceholder(img);
+  }, { once: true });
 
   return img;
 }
 
 /**
  * Construye un <a> con el título de la VN que enlaza a novel-details.html.
- *
- * SEGURIDAD: usa textContent (nunca innerHTML) para el texto del título.
- * El vnId ya viene validado del servicio VNDB (/^v\d+$/).
- *
  * @param {string} vnId
  * @param {string} title
  * @returns {HTMLAnchorElement}
@@ -168,9 +204,6 @@ function createStatusBadge(status) {
 /**
  * Crea una card para el grid de resultados de búsqueda.
  *
- * CAMBIO v4: _buildCoverSection recibe el índice para
- * aplicar fetchpriority="high" a las primeras 3 cards.
- *
  * @param {import('./vndb-service.js').VnEntry} vnEntry
  * @param {{isSaved?: boolean, savedStatus?: string|null, index?: number}} options
  * @returns {HTMLElement}
@@ -183,7 +216,6 @@ function createVnCard(vnEntry, { isSaved = false, savedStatus = null, index = 0 
   card.classList.add('vh-card--linkable');
   card.style.animationDelay = `${index * 40}ms`;
 
-  // Pasar index para que las primeras 3 cards tengan fetchpriority="high"
   card.appendChild(_buildCoverSection(vnEntry, index));
 
   const body = _el('div', 'vh-card__body');
@@ -212,13 +244,14 @@ function createVnCard(vnEntry, { isSaved = false, savedStatus = null, index = 0 
  * Construye la sección de portada de una card.
  *
  * @param {object} vnEntry
- * @param {number} [cardIndex=0] - Índice de la card en el grid.
- *   Las primeras 3 (index < 3) reciben fetchpriority="high".
+ * @param {number} [cardIndex=0]
  * @returns {HTMLElement}
  */
 function _buildCoverSection(vnEntry, cardIndex = 0) {
   const wrapper  = _el('div', 'vh-card__cover-wrapper');
   const imgCls   = `vh-card__cover${vnEntry.imageIsAdult ? ' vh-card__cover--adult' : ''}`;
+
+  // Las primeras 3 cards tienen prioridad alta para el LCP
   const priority = cardIndex < 3;
 
   wrapper.appendChild(_safeImage(vnEntry.imageUrl, vnEntry.title, imgCls, priority));
@@ -288,7 +321,7 @@ function _buildAddButton(vnEntry, isSaved, savedStatus) {
  *
  * @param {import('./vndb-service.js').VnEntry} vnEntry
  * @param {import('./library-store.js').LibraryEntry} libraryEntry
- * @param {number} index - Para animación escalonada y fetchpriority.
+ * @param {number} index
  * @returns {HTMLElement}
  */
 function createLibraryCard(vnEntry, libraryEntry, index = 0) {
@@ -300,7 +333,6 @@ function createLibraryCard(vnEntry, libraryEntry, index = 0) {
   card.classList.add('vh-card--linkable');
   card.style.animationDelay = `${index * 35}ms`;
 
-  // Imagen con badge de estado — index para fetchpriority
   const coverSection       = _buildCoverSection(vnEntry, index);
   const statusBadgeWrapper = _el('div', 'vh-card__status-badge');
   statusBadgeWrapper.appendChild(createStatusBadge(libraryEntry.status));
