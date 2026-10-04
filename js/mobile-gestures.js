@@ -674,12 +674,23 @@ const LazyImageManager = (() => {
       }
     };
 
-    // Timeout de seguridad: si la imagen no responde, mostrar placeholder
+    // Timeout de seguridad: si la imagen no responde en este tiempo,
+    // DEJAMOS de esperarla, pero NO reemplazamos el <img>.
+    //
+    // BUG CRÍTICO (corregido): antes este timeout llamaba a
+    // _applyPlaceholder(img, 'timeout'), que hace
+    // `img.parentNode.replaceChild(placeholder, img)`. Eso DESTRUÍA el
+    // elemento <img> de forma permanente mientras el navegador todavía
+    // tenía la descarga en vuelo. En móvil o conexión lenta eso hacía que
+    // sólo las 3-4 primeras covers (las de fetchpriority="high") llegaran a
+    // tiempo; el resto expiraba y quedaba como 📖 para siempre.
+    //
+    // Ahora el timeout solo deja de escuchar. El <img> sigue vivo y el
+    // navegador la muestra en cuanto termine la descarga.
     const timer = setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        _applyPlaceholder(img, 'timeout');
-      }
+      if (settled) return;
+      settled = true;
+      console.debug('[LazyImageManager] Timeout esperando imagen; se deja viva para que el navegador la muestre.');
     }, IMAGE_LOAD_TIMEOUT_MS);
 
     img.addEventListener('load',  () => settle(true),  { once: true });

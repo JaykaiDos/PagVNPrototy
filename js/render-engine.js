@@ -142,17 +142,30 @@ function _safeImage(src, alt, cls, priority = false) {
     img.addEventListener('error', () => _applyImgPlaceholder(img), { once: true });
   } else {
     /*
-     * CORRECCIÓN CRÍTICA:
-     * NO ponemos loading="lazy" aquí. LazyImageManager (mobile-gestures.js v3)
-     * gestiona el lazy loading via IntersectionObserver + MutationObserver.
-     * Cuando una imagen intersecta el viewport, LazyImageManager la pone
-     * en loading="eager" y adjunta los handlers.
+     * CORRECCIÓN BUG-IMAGE-03:
+     * Loading EAGER en TODAS las cards saturaba el pool de conexiones.
      *
-     * Si pusiéramos loading="lazy" aquí, el browser y el IO competirían:
-     * el browser difiere → el IO la ve "cargando" → espera evento load
-     * que llega tarde o nunca si el browser decide no cargarla aún.
+     * Lo que pasaba:
+     *   ui-controller inserta 25-50 <img> de golpe en un DocumentFragment.
+     *   Con loading="eager" el navegador abre TODAS las peticiones a
+     *   t.vndb.org a la vez. Por HTTP/1.1 solo hay ~6 conexiones
+     *   concurrentes por origen, así que la cola se llenaba entera.
+     *   Las únicas 3 con fetchpriority="high" (cardIndex < 3) se colaban
+     *   y cargaban; TODAS las demás esperaban turno.
+     *
+     *   Para entonces LazyImageManager ya había arrancado su contador de
+     *   8s (js/mobile-gestures.js → _attachLoadHandlers). Las imágenes en
+     *   cola no llegaban a tiempo, el timeout disparaba y el <img> era
+     *   reemplazado por un div placeholder de forma PERMANENTE.
+     *   Resultado: exactamente las 3-4 primeras cargas, el resto nunca más.
+     *
+     * Ahora: solo las 3 prioritarias van eager; el resto usa loading="lazy"
+     * nativo para que el navegador NO descargue lo que está fuera de la
+     * pantalla. LazyImageManager (IntersectionObserver con rootMargin 600px)
+     * las promotes a "eager" antes de que entren al viewport, así que
+     * coinciden y nunca compiten por el pool de conexiones.
      */
-    img.setAttribute('loading', 'eager');
+    img.setAttribute('loading', 'lazy');
   }
 
   // Handler de error como segunda línea de defensa

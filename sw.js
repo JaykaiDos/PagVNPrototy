@@ -27,13 +27,34 @@
  *   Se aumenta MAX_IMAGE_CACHE_ENTRIES de 150 a 300 para reducir
  *   la frecuencia de purgas (cada purga fuerza una petición de red).
  *
- * @version 3.0
+ /*
+ * v4 — PURGA DE CACHÉ ROTA
+ * ─────────────────────────────────────────────────────────────────
+ * El bug de "solo cargan las primeras 3-4 portadas" venía de una
+ * combinación de tres factores (ver abajo). Además, el CACHE_VERSION
+ * se quedó en 'v3' durante varias iteraciones, así que el shell caché
+ * seguía sirviendo el JS defectuoso Y el assets/css/lazy-images.css
+ * que ya no existe en el repo. Subir a 'v4' fuerza la purga completa
+ * en el evento 'activate' y todos los usuarios recuperan las imágenes.
+ *
+ * BUGS CORREGIDOS:
+ *  1. _fetchAndCacheImage() bloqueaba la respuesta de cada imagen
+ *     detrás de response.blob() + _pruneImageCache() (cache.keys()
+ *     + hasta 300 cache.match() + 30 cache.delete()). Con 25-50
+ *     covers simultáneas el event loop del SW se saturaba.
+ *  2. render-engine.js ponía loading="eager" en TODAS las cards,
+ *    agotando el pool de ~6 conexiones por origen de HTTP/1.1.
+ *  3. LazyImageManager destruía el <img> (replaceChild) al cumplirse
+ *     su timeout de 8s, cancelando la descarga en vuelo y dejando
+ *     un placeholder permanente de forma irreversible.
+ *
+ * @version 4.0
  */
 
 'use strict';
 
 
-const CACHE_VERSION = 'v3';
+const CACHE_VERSION = 'v4';
 const SHELL_CACHE   = `vnh-shell-${CACHE_VERSION}`;
 const IMAGES_CACHE  = `vnh-images-${CACHE_VERSION}`;
 const API_CACHE     = `vnh-api-${CACHE_VERSION}`;
@@ -140,7 +161,7 @@ const FALLBACK_IMAGE_SVG = `
 // ═══════════════════════════════════════════════════════════════
 
 self.addEventListener('install', (event) => {
-  console.info('[SW] Instalando v3…');
+  console.info('[SW] Instalando v4…');
 
   event.waitUntil(
     caches.open(SHELL_CACHE)
@@ -308,29 +329,24 @@ async function _fetchAndCacheImage(request, cache) {
   try {
     const response = await fetch(request);
 
-    if (response.ok) {
-      // Inyectar timestamp para el TTL
-      const headers = new Headers(response.headers);
-      headers.set('X-Cached-At', String(Date.now()));
+    if (!response.ok) return response;
 
-      const blob           = await response.blob();
-      const cachedResponse = new Response(blob, {
-        status:     response.status,
-        statusText: response.statusText,
-        headers,
-      });
-
-      // Purgar si el caché supera el límite antes de guardar
-      await _pruneImageCache(cache);
-      cache.put(request, cachedResponse.clone());
-
-      // Devolver una Response fresca desde el mismo blob
-      return new Response(blob, {
-        status:     response.status,
-        statusText: response.statusText,
-        headers:    response.headers,
-      });
-    }
+    // BUG CRÍTICO (corregido): antes, ANTES de devolver la respuesta al
+    // <img>, este código hacía:
+    //     const blob = await response.blob();        // bufferiza la imagen entera
+    //     await _pruneImageCache(cache);             // cache.keys() + N cache.match()
+    //     cache.put(...)                             // sin await
+    //
+    // Eso bloqueaba la respuesta de CADA imagen detrás de trabajo síncrono
+    // de caché. Con 25-50 covers entrando a la vez desde _renderSearchResults(),
+    // el event loop del SW se saturaba y ninguna imagen respondía a tiempo.
+    // El resultado se combinaba con el timeout de 8s de LazyImageManager:
+    // la imagen aún no había cargado, el <img> ya había sido reemplazado por
+    // un placeholder, y la descarga se cancelaba.
+    //
+    // Ahora: devolvemos la respuesta de red INMEDIATAMENTE y cacheamos en
+    // segundo plano. El <img> nunca espera al caché.
+    _cacheImageInBackground(request, response.clone(), cache);
 
     return response;
 
@@ -344,6 +360,36 @@ async function _fetchAndCacheImage(request, cache) {
       },
     });
   }
+}
+
+/**
+ * Guarda la imagen en caché sin bloquear la respuesta al <img>.
+ *
+ * Fire-and-forget: los errores se silencian a propósito, porque un fallo
+ * de caché nunca debe romper la visualización de una imagen que YA se
+ * descargó correctamente.
+ *
+ * @param {Request} request
+ * @param {Response} response - Clone de la respuesta de red.
+ * @param {Cache}   cache
+ */
+function _cacheImageInBackground(request, response, cache) {
+  (async () => {
+    const headers = new Headers(response.headers);
+    headers.set('X-Cached-At', String(Date.now()));
+
+    const blob           = await response.blob();
+    const cachedResponse = new Response(blob, {
+      status:     response.status,
+      statusText: response.statusText,
+      headers,
+    });
+
+    await _pruneImageCache(cache);
+    await cache.put(request, cachedResponse);
+  })().catch(() => {
+    // Silencioso a propósito (ver docblock).
+  });
 }
 
 /**

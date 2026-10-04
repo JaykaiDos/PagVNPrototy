@@ -79,8 +79,13 @@
         onload="this.rel='stylesheet'" />
   <noscript><link rel="stylesheet" href="assets/css/vn-hub-auth.css" /></noscript>
 
-  <link rel="preload" href="assets/css/lazy-images.css" as="style" 
-        onload="this.rel='stylesheet'" />
+  <!--
+    NOTA: la etiqueta <link> de assets/css/lazy-images.css se eliminó a
+    propósito (commit 233b39d). Ese archivo ya no existe y el Service
+    Worker lo seguía sirviendo desde SHELL_CACHE para todo usuario que
+    hubiera visitado el sitio antes de borrarlo, reinyectando las reglas
+    de opacity:0 de la v3 vieja.
+  -->
 </head>
 
 <body>
